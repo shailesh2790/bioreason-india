@@ -1,0 +1,59 @@
+# ── Environment & secrets ────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ── Data (large files — download via pipeline scripts) ──────────────────
+data/
+*.dump
+*.csv
+*.tsv
+
+# ── Strategic / private docs (never commit) ──────────────────────────────
+STRATEGY.md
+*_prd.md
+*_prd.docx
+*PRD*.md
+*PRD*.docx
+NOTES.md
+TODO_PRIVATE.md
+private/
+petridish.md
+PETRIDISH.md
+*-strategy.md
+*-internal.md
+*.private.md
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# ── Node / Next.js ───────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+
+# ── Vercel ────────────────────────────────────────────────────────────────
+.vercel
+
+# ── Logs & build artifacts ───────────────────────────────────────────────
+*.log
+tsconfig.tsbuildinfo
+tsc_err.txt
+tsc_out.txt
+
+# ── IDE ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

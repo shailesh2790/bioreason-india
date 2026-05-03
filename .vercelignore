@@ -1,0 +1,23 @@
+node_modules
+.next
+data/
+pipeline/
+# Python FastAPI server — excluded from Vercel (runs on Railway/ngrok)
+api/reason.py
+api/vision.py
+api/__init__.py
+api/server.log
+api/server_err.log
+*.log
+*.docx
+bioreason_dream_prd.md
+STRATEGY.md
+Makefile
+docker-compose.yml
+Dockerfile
+railway.toml
+requirements.txt
+tsconfig.tsbuildinfo
+tsc_err.txt
+tsc_out.txt
+dev.log
