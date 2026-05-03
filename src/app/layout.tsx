@@ -13,7 +13,8 @@ export const metadata: Metadata = {
 
 const NAV_LINKS = [
   { href: "/query",            label: "Query",        color: "hover:text-emerald-400" },
-  { href: "/vision",           label: "Vision",       color: "hover:text-cyan-400",   hot: true },
+  { href: "/twin",             label: "Twin",         color: "hover:text-cyan-400",   hot: true },
+  { href: "/vision",           label: "Vision",       color: "hover:text-cyan-400" },
   { href: "/hypothesis",       label: "Hypothesis",   color: "hover:text-yellow-400" },
   { href: "/repurpose",        label: "Repurpose",    color: "hover:text-blue-400" },
   { href: "/validate",         label: "Ayurveda",     color: "hover:text-orange-400" },

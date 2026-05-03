@@ -36,7 +36,7 @@ app = FastAPI(title="BioReason API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:3001"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type"],
 )
 
@@ -665,6 +665,13 @@ async def vision_modalities():
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+# Sub-routers (must be at the bottom to avoid circular imports — patient.py
+# imports helpers from this file)
+# ---------------------------------------------------------------------------
+
+from api.patient import router as patient_router  # noqa: E402
+app.include_router(patient_router)
+
 
 if __name__ == "__main__":
     import uvicorn
