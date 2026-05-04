@@ -26,9 +26,23 @@ function Write-Log {
 }
 
 function Test-FastApi {
+  # Returns $true if FastAPI process is responding, regardless of Neo4j health.
+  # Neo4j being down makes status "degraded" — that's NOT a FastAPI problem; don't restart.
   try {
     $r = Invoke-RestMethod "http://localhost:8000/health" -TimeoutSec 4 -ErrorAction Stop
-    return $r.status -eq "ok"
+    return ($r.status -eq "ok") -or ($r.status -eq "degraded")
+  } catch { return $false }
+}
+
+function Test-Neo4j {
+  # Just checks if Neo4j Bolt port is reachable. We don't try to start it —
+  # the user manages Neo4j Desktop. This is informational only.
+  try {
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $iar = $tcp.BeginConnect("127.0.0.1", 7687, $null, $null)
+    $ok = $iar.AsyncWaitHandle.WaitOne(1500, $false)
+    if ($ok) { $tcp.EndConnect($iar); $tcp.Close(); return $true }
+    $tcp.Close(); return $false
   } catch { return $false }
 }
 
@@ -93,8 +107,13 @@ function Sync-VercelUrl {
 Write-Log "BioReason tunnel watcher started (PID $PID)"
 
 while ($true) {
-  if (-not (Test-FastApi))     { Start-FastApi }
-  if (-not (Test-Cloudflared)) { Start-Cloudflared }
+  $neo4jUp  = Test-Neo4j
+  $apiUp    = Test-FastApi
+  $tunnelUp = Test-Cloudflared
+
+  if (-not $neo4jUp) { Write-Log "Neo4j: DOWN (port 7687 unreachable) - please start Neo4j Desktop" }
+  if (-not $apiUp)   { Start-FastApi }
+  if (-not $tunnelUp){ Start-Cloudflared }
 
   $url = Get-TunnelUrl
   if ($url) {
