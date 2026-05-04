@@ -225,6 +225,29 @@ Pattern F — Pharmacogenomics variants affecting a drug:
   WHERE toLower(d.name) CONTAINS toLower("warfarin")
   RETURN v.name AS variant, v.af_india AS india_freq, v.clinical_note AS note LIMIT 20
 
+Pattern I — Drug → Disease via PROTEIN-PROTEIN INTERACTION (3-hop, USE WHEN PATTERN A RETURNS NOTHING):
+  Many drug-target genes don't directly associate with the target disease.
+  Expand through PPI to find genes that DO. This finds Metformin → AMPK → APP → Alzheimer.
+  MATCH (d:Drug)-[:TARGETS]->(g1:Gene)-[:PROTEIN_PROTEIN_INTERACTION]->(g2:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
+  WHERE toLower(d.name) CONTAINS toLower("metformin")
+    AND toLower(dis.name) CONTAINS toLower("alzheimer")
+  RETURN d.name AS drug, g1.name AS direct_target, g2.name AS interacts_with, dis.name AS disease LIMIT 20
+
+Pattern J — Drug → Disease via shared PATHWAY (3-hop, alternative to PPI):
+  When both drug-target gene and disease-associated gene participate in same pathway.
+  MATCH (d:Drug)-[:TARGETS]->(g1:Gene)-[:INTERACTS_WITH]->(pw:Pathway)<-[:INTERACTS_WITH]-(g2:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
+  WHERE toLower(d.name) CONTAINS toLower("metformin")
+    AND toLower(dis.name) CONTAINS toLower("alzheimer")
+  RETURN d.name AS drug, g1.name AS direct_target, pw.name AS pathway, g2.name AS via_gene, dis.name AS disease LIMIT 20
+
+CRITICAL HEURISTIC — When the question is "How does Drug X connect to Disease Y" or "What pathway connects Drug X to Disease Y":
+  Step 1: Pattern A (direct: Drug → Gene → Disease)
+  Step 2: Pattern I (PPI hop: Drug → Gene → Gene → Disease)  — almost always the productive one
+  Step 3: Pattern J (Pathway hop) only if the question explicitly mentions pathway/mechanism
+
+DO NOT generate ONLY Pattern A for drug-disease questions. Direct associations are sparse;
+the 3-hop PPI pattern (Pattern I) is what reveals real mechanistic connections.
+
 Cypher rules:
   1. Always LIMIT 30-50 on queries returning many rows
   2. Name matching: WHERE toLower(n.name) CONTAINS toLower("keyword") — use SHORT keywords
