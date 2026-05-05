@@ -59,6 +59,28 @@ function Test-Cloudflared {
   return $null -ne $procs
 }
 
+function Test-TunnelLive {
+  # Probes the cached tunnel URL. Returns $true only if it currently serves /health.
+  # cloudflared's process can be alive while the Cloudflare session is dead
+  # (e.g., after laptop sleep). Without this probe we'd loop forever on a stale URL.
+  param([string]$Url)
+  if (-not $Url) { return $false }
+  try {
+    $r = Invoke-WebRequest "$Url/health" -TimeoutSec 6 -UseBasicParsing -ErrorAction Stop
+    return ($r.StatusCode -eq 200) -and ($r.Content -match '"status"')
+  } catch { return $false }
+}
+
+function Restart-Cloudflared {
+  Write-Log "Killing stale cloudflared (tunnel session dead)..."
+  Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  # Clear the log so Get-TunnelUrl will see the FRESH URL, not the stale one
+  Remove-Item $TunnelLog -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+  Start-Cloudflared
+}
+
 function Start-Cloudflared {
   Write-Log "Starting cloudflared quick tunnel..."
   Remove-Item $TunnelLog -ErrorAction SilentlyContinue
@@ -109,15 +131,23 @@ Write-Log "BioReason tunnel watcher started (PID $PID)"
 while ($true) {
   $neo4jUp  = Test-Neo4j
   $apiUp    = Test-FastApi
-  $tunnelUp = Test-Cloudflared
+  $procUp   = Test-Cloudflared
 
   if (-not $neo4jUp) { Write-Log "Neo4j: DOWN (port 7687 unreachable) - please start Neo4j Desktop" }
   if (-not $apiUp)   { Start-FastApi }
-  if (-not $tunnelUp){ Start-Cloudflared }
+  if (-not $procUp)  { Start-Cloudflared }
 
   $url = Get-TunnelUrl
   if ($url) {
-    Sync-VercelUrl -NewUrl $url
+    if ($apiUp -and -not (Test-TunnelLive -Url $url)) {
+      Write-Log "Tunnel URL $url is unreachable - cycling cloudflared"
+      Restart-Cloudflared
+      Start-Sleep -Seconds 8
+      $url = Get-TunnelUrl
+    }
+    if ($url) {
+      Sync-VercelUrl -NewUrl $url
+    }
   } else {
     Write-Log "No tunnel URL captured yet"
   }
