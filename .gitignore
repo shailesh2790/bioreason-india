@@ -57,3 +57,6 @@ tsc_out.txt
 # ── OS ────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+BioReason_Deep_Strategy.md
+BioReason_*_Strategy*.md

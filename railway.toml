@@ -3,8 +3,9 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "uvicorn api.reason:app --host 0.0.0.0 --port $PORT"
+# Use sh -c so $PORT expands. Railway sets PORT dynamically per deploy.
+startCommand = "sh -c 'uvicorn api.reason:app --host 0.0.0.0 --port ${PORT:-8000}'"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 90
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
+restartPolicyMaxRetries = 5

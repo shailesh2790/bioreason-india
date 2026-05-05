@@ -1,0 +1,36 @@
+# Node / Next.js (FastAPI build doesn't need any of this)
+node_modules
+.next
+package.json
+package-lock.json
+src/
+postcss.config.mjs
+tailwind.config.ts
+tsconfig.json
+tsconfig.tsbuildinfo
+next-env.d.ts
+next.config.mjs
+.vercel
+.vercelignore
+
+# Git
+.git
+.gitignore
+.github
+
+# Data
+data/
+pipeline/
+scripts/
+
+# Docs
+README.md
+CONTRIBUTING.md
+LICENSE
+*.md
+*.docx
+*.log
+
+# Build artifacts
+__pycache__
+*.pyc

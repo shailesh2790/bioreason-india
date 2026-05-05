@@ -2,6 +2,9 @@ node_modules
 .next
 data/
 pipeline/
+docker/
+scripts/
+*.dump
 # Python FastAPI server — excluded from Vercel (runs on Railway/ngrok)
 api/reason.py
 api/vision.py

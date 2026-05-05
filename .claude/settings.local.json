@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(railway volume add --help 2>&1)"
+    ]
+  }
+}
