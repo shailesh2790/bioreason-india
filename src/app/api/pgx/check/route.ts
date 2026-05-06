@@ -1,0 +1,24 @@
+import { NextRequest, NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
+const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const upstream = await fetch(`${FASTAPI_URL}/pgx/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await upstream.text();
+    try {
+      return NextResponse.json(JSON.parse(text), { status: upstream.status });
+    } catch {
+      return NextResponse.json({ error: `Backend non-JSON: ${text.slice(0, 100)}` }, { status: 503 });
+    }
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "error" }, { status: 503 });
+  }
+}

@@ -13,12 +13,14 @@ export const metadata: Metadata = {
 
 const NAV_LINKS = [
   { href: "/query",            label: "Query",        color: "hover:text-emerald-400" },
-  { href: "/twin",             label: "Twin",         color: "hover:text-cyan-400",   hot: true },
+  { href: "/rare",             label: "Rare Disease", color: "hover:text-red-400",    hot: true },
+  { href: "/twin",             label: "Twin",         color: "hover:text-cyan-400" },
   { href: "/vision",           label: "Vision",       color: "hover:text-cyan-400" },
   { href: "/hypothesis",       label: "Hypothesis",   color: "hover:text-yellow-400" },
   { href: "/repurpose",        label: "Repurpose",    color: "hover:text-blue-400" },
   { href: "/validate",         label: "Ayurveda",     color: "hover:text-orange-400" },
   { href: "/pharmacogenomics", label: "PGx",          color: "hover:text-purple-400" },
+  { href: "/pgx-api",          label: "PGx API",      color: "hover:text-purple-400",  hot: true },
   { href: "/synergy",          label: "Synergy",      color: "hover:text-cyan-400" },
   { href: "/alerts",           label: "Alerts",       color: "hover:text-red-400",    alert: true },
   { href: "/batch",            label: "Batch",        color: "hover:text-emerald-400" },

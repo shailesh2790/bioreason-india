@@ -693,7 +693,11 @@ async def vision_modalities():
 # ---------------------------------------------------------------------------
 
 from api.patient import router as patient_router  # noqa: E402
+from api.pgx import router as pgx_router  # noqa: E402
+from api.rare import router as rare_router  # noqa: E402
 app.include_router(patient_router)
+app.include_router(pgx_router)
+app.include_router(rare_router)
 
 
 if __name__ == "__main__":
