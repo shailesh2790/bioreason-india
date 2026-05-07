@@ -67,7 +67,7 @@ export default function GraphStatsPage() {
             <span style={{ color: "var(--purple)" }}>Statistics</span>
           </h1>
           <p style={{ color: "var(--text-2)", fontSize: 15 }}>
-            Live statistics from the Neo4j BioReason knowledge graph instance.
+            Live statistics from the Neo4j PetriDish knowledge graph instance.
           </p>
         </div>
 

@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
       {
-        error: `Could not reach BioReason API at ${FASTAPI_URL}. Is the FastAPI server running? (${message})`,
+        error: `Could not reach PetriDish API at ${FASTAPI_URL}. Is the FastAPI server running? (${message})`,
       },
       { status: 503 }
     );

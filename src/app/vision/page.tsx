@@ -115,7 +115,7 @@ export default function VisionPage() {
             <span style={{ color: "var(--text-3)", fontSize: 12 }}>Image → KG Bridge · India-calibrated</span>
           </div>
           <h1 style={{ fontSize: 36, fontWeight: 900, letterSpacing: "-0.03em", marginBottom: 10 }}>
-            BioReason{" "}
+            PetriDish{" "}
             <span style={{ color: "var(--cyan)" }}>Vision</span>
           </h1>
           <p style={{ color: "var(--text-2)", fontSize: 15, maxWidth: 680, lineHeight: 1.7 }}>

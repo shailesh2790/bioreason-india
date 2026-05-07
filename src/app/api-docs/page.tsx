@@ -167,7 +167,7 @@ export default function ApiDocsPage() {
             API <span style={{ color: "var(--green)" }}>Reference</span>
           </h1>
           <p style={{ color: "var(--text-2)", fontSize: 15, lineHeight: 1.6 }}>
-            Integrate BioReason's knowledge graph reasoning into your research pipeline.
+            Integrate PetriDish&apos;s knowledge graph reasoning into your research pipeline.
             No authentication required during beta.
           </p>
         </div>

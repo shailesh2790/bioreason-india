@@ -275,7 +275,7 @@ export default function RarePage() {
                   Build a phenotype profile and click <em>Generate differential</em>
                 </p>
                 <p style={{ color: "var(--text-3)", fontSize: 13, maxWidth: 480, margin: "0 auto", lineHeight: 1.6 }}>
-                  We&apos;ll search 11,783 disease nodes against 6,465 phenotype nodes and 72,506 disease-phenotype edges in the BioReason knowledge graph, calibrated against IndiGen + Genome India variant frequencies.
+                  We&apos;ll search 11,783 disease nodes against 6,465 phenotype nodes and 72,506 disease-phenotype edges in the PetriDish knowledge graph, calibrated against IndiGen + Genome India variant frequencies.
                 </p>
               </div>
             )}

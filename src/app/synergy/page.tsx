@@ -67,7 +67,7 @@ Return up to 15 synergistic partners ranked by mechanistic evidence strength.`;
           </h1>
           <p style={{ color: "var(--text-2)", fontSize: 15, maxWidth: 620, lineHeight: 1.7 }}>
             Discover synergistic drug combinations from 2.67M curated pharmacological interaction edges.
-            Includes Ayurvedic compound synergies — unique to BioReason. Optimised for India-endemic diseases.
+            Includes Ayurvedic compound synergies — unique to PetriDish. Optimised for India-endemic diseases.
           </p>
         </div>
 

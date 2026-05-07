@@ -178,7 +178,7 @@ Generate a mechanism confidence assessment suitable for regulatory submission.`;
                   </p>
                   <h2 style={{ fontSize: 22, fontWeight: 800, color: "var(--text-1)", marginBottom: 4 }}>{compound}</h2>
                   <p style={{ fontSize: 12, color: "var(--text-3)" }}>
-                    BioReason · IMPPAT 2.0 · PrimeKG · Generated {today}
+                    PetriDish · IMPPAT 2.0 · PrimeKG · Generated {today}
                   </p>
                 </div>
                 <div style={{ textAlign: "right" }}>

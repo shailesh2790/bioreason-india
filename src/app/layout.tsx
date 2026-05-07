@@ -11,7 +11,7 @@ const THEME_INIT_SCRIPT = `
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "BioReason — India's Biomedical Intelligence Platform",
+  title: "PetriDish — India's Biomedical Intelligence Platform",
   description:
     "Multi-hop reasoning over 4.3M biomedical relationships, extended with Indian population genomics, 17,967 Ayurvedic compounds, and medical image analysis.",
 };
@@ -67,7 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <line x1="20" y1="6" x2="20" y2="22" stroke="rgba(245,158,11,0.4)" strokeWidth="1"/>
               </svg>
               <span style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-0.02em", color: "var(--text-1)" }}>
-                Bio<span style={{ color: "var(--green)" }}>Reason</span>
+                Petri<span style={{ color: "var(--green)" }}>Dish</span>
               </span>
             </Link>
 

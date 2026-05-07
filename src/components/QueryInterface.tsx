@@ -258,7 +258,7 @@ export default function QueryInterface() {
                     ))}
                     <button
                       onClick={() => exportReportPdf({
-                        title: "BioReason Query", subtitle: "Analysis Report",
+                        title: "PetriDish Query", subtitle: "Analysis Report",
                         query: question, answer: result.answer,
                         paths: result.paths, cypher_steps: result.cypher_steps,
                         module: "query", subject: question.slice(0, 40),

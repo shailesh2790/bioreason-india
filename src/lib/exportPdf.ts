@@ -185,10 +185,10 @@ export async function exportReportPdf(data: ReportData) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
     doc.setTextColor(80, 80, 90);
-    doc.text("BioReason · India-extended Biomedical Knowledge Graph · PrimeKG + IMPPAT + IndiGen", 12, H - 4);
+    doc.text("PetriDish · India-extended Biomedical Knowledge Graph · PrimeKG + IMPPAT + IndiGen", 12, H - 4);
     doc.text(`Page ${p} of ${pageCount}`, W - 12, H - 4, { align: "right" });
   }
 
-  const filename = `bioreason_${data.module}_${data.subject.replace(/\s+/g, "_").slice(0, 30)}_${Date.now()}.pdf`;
+  const filename = `petridish_${data.module}_${data.subject.replace(/\s+/g, "_").slice(0, 30)}_${Date.now()}.pdf`;
   doc.save(filename);
 }

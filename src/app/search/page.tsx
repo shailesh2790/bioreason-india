@@ -69,7 +69,7 @@ export default function SearchPage() {
             <span style={{ color: "var(--green)" }}>Search</span>
           </h1>
           <p style={{ color: "var(--text-2)", fontSize: 15, lineHeight: 1.6 }}>
-            Find any node in the BioReason knowledge graph — drugs, genes, diseases, pathways, phytochemicals.
+            Find any node in the PetriDish knowledge graph — drugs, genes, diseases, pathways, phytochemicals.
           </p>
         </div>
 

@@ -39,7 +39,7 @@ const MODULES = [
   {
     tag: "Vision", tagColor: "#06B6D4",
     icon: "🔬",
-    title: "BioReason Vision",
+    title: "PetriDish Vision",
     desc: "Upload a retinal fundus, blood smear, or biopsy. AI extracts biomarkers, maps them to the knowledge graph, and returns treatment paths with active Indian trial data.",
     href: "/vision",
     examples: ["Diabetic Retinopathy", "P. falciparum", "HER2+ Cancer", "TB AFB"],
@@ -235,7 +235,7 @@ export default function HomePage() {
           <div>
             <div className="badge badge-cyan" style={{ marginBottom: 16 }}>
               <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--cyan)", display: "inline-block", animation: "pulse-glow 1.5s infinite" }} />
-              NEW · BioReason Vision
+              NEW · PetriDish Vision
             </div>
             <h2 style={{ fontSize: 26, fontWeight: 800, color: "var(--text-1)", marginBottom: 14, lineHeight: 1.2, letterSpacing: "-0.02em" }}>
               Upload an image.<br />Get a treatment plan.
