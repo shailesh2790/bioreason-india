@@ -34,6 +34,33 @@
   --text-1: #F0F6FC;
   --text-2: #8B949E;
   --text-3: #4A5568;
+
+  --nav-bg:      rgba(3, 11, 20, 0.85);
+  --shadow-soft: 0 1px 2px rgba(0,0,0,0.4);
+}
+
+/* ── Warm / Paper theme (toggled via [data-theme="warm"] on <html>) ──────── */
+[data-theme="warm"] {
+  --bg:          #FBF7F0;
+  --surface:     #FFFFFF;
+  --surface-2:   #F4EEE2;
+  --surface-3:   #EAE0CC;
+  --border:      #E5DBC4;
+  --border-2:    #D2C4A8;
+
+  --green-dim:   rgba(16, 185, 129, 0.14);
+  --amber-dim:   rgba(245, 158, 11, 0.16);
+  --cyan-dim:    rgba(6, 182, 212, 0.14);
+  --purple-dim:  rgba(139, 92, 246, 0.14);
+  --red-dim:     rgba(244, 63, 94, 0.14);
+  --blue-dim:    rgba(59, 130, 246, 0.14);
+
+  --text-1: #1F1A14;
+  --text-2: #6B5F4F;
+  --text-3: #9A8F80;
+
+  --nav-bg:      rgba(251, 247, 240, 0.88);
+  --shadow-soft: 0 1px 3px rgba(31,26,20,0.08);
 }
 
 /* ── Base ───────────────────────────────────────────────────────────────── */
@@ -141,10 +168,14 @@ body {
   border: 1px solid var(--border);
   border-radius: 16px;
   transition: border-color 0.25s, box-shadow 0.25s;
+  box-shadow: var(--shadow-soft);
 }
 .card:hover {
   border-color: var(--border-2);
-  box-shadow: 0 0 30px rgba(16,185,129,0.06);
+  box-shadow: 0 0 30px rgba(16,185,129,0.06), var(--shadow-soft);
+}
+[data-theme="warm"] .card:hover {
+  box-shadow: 0 4px 20px rgba(31,26,20,0.06);
 }
 
 .card-glow {
@@ -237,13 +268,14 @@ body {
 /* Button styles */
 .btn-primary {
   background: var(--green);
-  color: #030B14;
+  color: #032018;
   font-weight: 700;
   border-radius: 10px;
   transition: all 0.2s;
   position: relative;
   overflow: hidden;
 }
+[data-theme="warm"] .btn-primary { color: #FFFFFF; }
 .btn-primary::after {
   content: '';
   position: absolute;
@@ -291,6 +323,15 @@ body {
 .conf-high   { color: #34D399; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.25); }
 .conf-medium { color: #FBBF24; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.25); }
 .conf-low    { color: #FB923C; background: rgba(251,146,60,0.1); border: 1px solid rgba(251,146,60,0.25); }
+[data-theme="warm"] .conf-high   { color: #047857; background: rgba(4,120,87,0.10);  border-color: rgba(4,120,87,0.30); }
+[data-theme="warm"] .conf-medium { color: #B45309; background: rgba(180,83,9,0.10);  border-color: rgba(180,83,9,0.30); }
+[data-theme="warm"] .conf-low    { color: #C2410C; background: rgba(194,65,12,0.10); border-color: rgba(194,65,12,0.30); }
+[data-theme="warm"] .badge-green  { color: #047857; }
+[data-theme="warm"] .badge-amber  { color: #B45309; }
+[data-theme="warm"] .badge-cyan   { color: #0E7490; }
+[data-theme="warm"] .badge-purple { color: #6D28D9; }
+[data-theme="warm"] .badge-red    { color: #BE123C; }
+[data-theme="warm"] .badge-blue   { color: #1D4ED8; }
 
 /* Network graph enhancements */
 .network-container {

@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
+import ThemeToggle from "../components/ThemeToggle";
 import "./globals.css";
+
+const THEME_INIT_SCRIPT = `
+(function(){try{var t=localStorage.getItem('bioreason-theme');if(t==='warm'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();
+`;
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -32,12 +37,15 @@ const NAV_LINKS = [
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body style={{ background: "var(--bg)", minHeight: "100vh" }}>
 
         {/* Navigation */}
         <nav style={{
           borderBottom: "1px solid var(--border)",
-          background: "rgba(3, 11, 20, 0.85)",
+          background: "var(--nav-bg)",
           backdropFilter: "blur(20px)",
           position: "sticky",
           top: 0,
@@ -63,7 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </span>
             </Link>
 
-            {/* Links */}
+            {/* Links + theme toggle */}
             <div style={{ display: "flex", alignItems: "center", gap: 2, overflowX: "auto" }}>
               {NAV_LINKS.map(({ href, label, alert, hot }) => (
                 <Link
@@ -89,6 +97,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   {label}
                 </Link>
               ))}
+              <div style={{ marginLeft: 8 }}>
+                <ThemeToggle />
+              </div>
             </div>
 
           </div>
