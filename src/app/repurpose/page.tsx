@@ -21,6 +21,16 @@ interface ReasonResponse {
   answer: string;
   paths: PathData[];
   cypher_steps: { step: string; cypher: string }[];
+  candidates?: Array<{
+    drug: string;
+    score: number;
+    confidence: "HIGH" | "MEDIUM" | "LOW";
+    evidence: string[];
+    genes: string[];
+    via_genes: string[];
+    trials: Array<{ nct_id?: string; title?: string; status?: string; phase?: string; india_sites?: string[] }>;
+    pgx_flags: Array<{ variant?: string; af_india?: number; af_global?: number; note?: string }>;
+  }>;
   error?: string;
 }
 
@@ -36,17 +46,11 @@ export default function RepurposePage() {
     setResult(null);
     setError(null);
 
-    const question = `Which FDA-approved drugs could be repurposed for ${disease}?
-Find drugs NOT currently approved for this disease that: target proteins in pathways associated with ${disease}, or share gene targets with drugs that treat ${disease}.
-Also check if any IMPPAT phytochemicals share targets with those pathways.
-For each candidate, give the exact multi-hop biological mechanism path.
-Rank by strength of mechanistic connection. India-prevalent disease context applies.`;
-
     try {
-      const res = await fetch("/api/reason", {
+      const res = await fetch("/api/repurpose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, max_hops: 3, india_context: true }),
+        body: JSON.stringify({ disease, limit: 10, india_context: true }),
       });
       const data = await res.json();
       if (!res.ok) setError(data.error ?? `Error ${res.status}`);
@@ -183,7 +187,7 @@ Rank by strength of mechanistic connection. India-prevalent disease context appl
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <p className="section-label">Repurposing Analysis</p>
                   <span style={{ fontSize: 11, color: "var(--text-3)", fontFamily: "monospace" }}>
-                    {result.cypher_steps.length} queries · {result.paths.length} paths
+                    {result.cypher_steps.length} queries · {result.candidates?.length ?? 0} candidates · {result.paths.length} paths
                   </span>
                 </div>
                 <button
@@ -213,6 +217,64 @@ Rank by strength of mechanistic connection. India-prevalent disease context appl
               </div>
               <div className="analysis-text">{result.answer}</div>
             </div>
+
+            {/* Ranked candidates */}
+            {!!result.candidates?.length && (
+              <div className="card" style={{ padding: 24 }}>
+                <p className="section-label" style={{ marginBottom: 16 }}>
+                  Ranked Repurposing Candidates
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+                  {result.candidates.map((candidate, i) => (
+                    <div key={candidate.drug} style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 10,
+                      padding: 16,
+                      background: "var(--surface-2)",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+                        <div>
+                          <p style={{ color: "var(--text-3)", fontSize: 11, marginBottom: 4 }}>Rank {i + 1}</p>
+                          <h3 style={{ color: "var(--text-1)", fontSize: 16, fontWeight: 800 }}>{candidate.drug}</h3>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <span className={`badge ${candidate.confidence === "HIGH" ? "conf-high" : candidate.confidence === "MEDIUM" ? "conf-medium" : "conf-low"}`} style={{ fontSize: 10 }}>
+                            {candidate.confidence}
+                          </span>
+                          <p style={{ color: "var(--blue)", fontSize: 12, fontWeight: 800, marginTop: 6 }}>Score {candidate.score}</p>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <p style={{ color: "var(--text-2)", fontSize: 12, lineHeight: 1.6 }}>
+                          Targets: {(candidate.genes.length ? candidate.genes.slice(0, 4).join(", ") : "not named")}
+                        </p>
+                        {!!candidate.via_genes.length && (
+                          <p style={{ color: "var(--text-3)", fontSize: 12, lineHeight: 1.6 }}>
+                            PPI bridge: {candidate.via_genes.slice(0, 4).join(", ")}
+                          </p>
+                        )}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {candidate.evidence.slice(0, 4).map((item) => (
+                            <span key={item} className="badge badge-blue" style={{ fontSize: 10 }}>{item}</span>
+                          ))}
+                        </div>
+                        {!!candidate.trials.length && (
+                          <p style={{ color: "var(--green)", fontSize: 12, lineHeight: 1.6 }}>
+                            Indian trial: {candidate.trials[0].nct_id ?? "CTRI/ClinicalTrials.gov"} · {candidate.trials[0].status ?? "status unknown"}
+                          </p>
+                        )}
+                        {!!candidate.pgx_flags.length && (
+                          <p style={{ color: "var(--amber)", fontSize: 12, lineHeight: 1.6 }}>
+                            PGx: {candidate.pgx_flags[0].variant ?? "variant flag"} · AF India {candidate.pgx_flags[0].af_india ?? "n/a"}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Paths */}
             {result.paths.length > 0 && (

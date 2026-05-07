@@ -306,6 +306,27 @@ class ReasonResponse(BaseModel):
     error: Optional[str] = None
 
 
+class RepurposeRequest(BaseModel):
+    disease: str
+    limit: int = 10
+    india_context: bool = True
+
+
+class RepurposeCandidate(BaseModel):
+    drug: str
+    score: int
+    confidence: str
+    evidence: list[str]
+    genes: list[str] = []
+    via_genes: list[str] = []
+    trials: list[dict] = []
+    pgx_flags: list[dict] = []
+
+
+class RepurposeResponse(ReasonResponse):
+    candidates: list[RepurposeCandidate]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -337,6 +358,12 @@ def _serialize(value: Any) -> Any:
 def run_cypher(cypher: str) -> list[dict]:
     with neo4j_driver().session() as session:
         result = session.run(cypher)
+        return [_serialize(dict(record)) for record in result]
+
+
+def run_cypher_params(cypher: str, params: dict) -> list[dict]:
+    with neo4j_driver().session() as session:
+        result = session.run(cypher, **params)
         return [_serialize(dict(record)) for record in result]
 
 
@@ -466,6 +493,104 @@ def extract_paths(step_results: list[dict]) -> list[PathResult]:
     return paths[:20]
 
 
+def _keyword(text: str) -> str:
+    """Choose a compact disease keyword that works with PrimeKG/MONDO names."""
+    cleaned = " ".join(ch for ch in text.lower().replace("-", " ").split() if ch)
+    aliases = {
+        "mdr tuberculosis": "tuberculosis",
+        "mdr tb": "tuberculosis",
+        "diabetic tb": "tuberculosis",
+        "type 2 diabetes": "diabetes",
+        "t2d": "diabetes",
+        "alzheimer's disease": "alzheimer",
+        "alzheimers disease": "alzheimer",
+        "kala azar": "leishmaniasis",
+        "visceral leishmaniasis": "leishmaniasis",
+        "non alcoholic fatty liver disease": "fatty liver",
+    }
+    if cleaned in aliases:
+        return aliases[cleaned]
+    for phrase, alias in aliases.items():
+        if phrase in cleaned:
+            return alias
+    words = [w for w in cleaned.split() if len(w) > 3 and w not in {"disease", "syndrome", "chronic"}]
+    return words[0] if len(words) == 1 else " ".join(words[:2]) if words else cleaned
+
+
+def _confidence(score: int) -> str:
+    if score >= 8:
+        return "HIGH"
+    if score >= 4:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _uniq(values: list[Any], limit: int = 8) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value:
+            continue
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _build_candidate_paths(candidates: list[RepurposeCandidate], disease: str) -> list[PathResult]:
+    paths: list[PathResult] = []
+    for candidate in candidates[:8]:
+        if candidate.via_genes:
+            labels = ["Drug", "Gene", "Gene", "Disease"]
+            names = [candidate.drug, candidate.genes[0] if candidate.genes else "Drug target", candidate.via_genes[0], disease]
+            edge_types = ["TARGETS", "PROTEIN_PROTEIN_INTERACTION", "ASSOCIATED_WITH"]
+        else:
+            labels = ["Drug", "Gene", "Disease"]
+            names = [candidate.drug, candidate.genes[0] if candidate.genes else "Disease gene", disease]
+            edge_types = ["TARGETS", "ASSOCIATED_WITH"]
+
+        paths.append(PathResult(
+            nodes=[
+                {"id": f"{label}:{name}", "name": name, "labels": [label]}
+                for label, name in zip(labels, names)
+            ],
+            edges=[{"type": edge_type, "source": "PrimeKG"} for edge_type in edge_types],
+            confidence=candidate.confidence,
+            description=f"{candidate.drug} scored {candidate.score}: " + "; ".join(candidate.evidence[:3]),
+        ))
+    return paths
+
+
+def _format_repurpose_answer(disease: str, keyword: str, candidates: list[RepurposeCandidate]) -> str:
+    if not candidates:
+        return (
+            f"No repurposing candidates were found for {disease} using keyword '{keyword}'. "
+            "BioReason traversed Drug -> Gene -> Disease and Drug -> Gene -> PPI -> Gene -> Disease, "
+            "then checked Indian trials, PGx flags, and IMPPAT overlap. This usually means the disease term is sparse in the loaded graph; try a broader synonym."
+        )
+
+    lead = (
+        f"BioReason found {len(candidates)} repurposing candidates for {disease} using a topology-first ensemble: "
+        "direct target overlap, PPI-mediated disease-gene proximity, Indian clinical trial evidence, PGx safety context, and IMPPAT overlap."
+    )
+    bullets = []
+    for c in candidates[:5]:
+        genes = ", ".join(c.genes[:3]) if c.genes else "no named target returned"
+        overlay = []
+        if c.trials:
+            overlay.append(f"{len(c.trials)} Indian trial link(s)")
+        if c.pgx_flags:
+            overlay.append(f"{len(c.pgx_flags)} PGx flag(s)")
+        overlay_text = f" India overlay: {', '.join(overlay)}." if overlay else ""
+        bullets.append(
+            f"- {c.drug}: score {c.score} ({c.confidence}) via {genes}. "
+            f"Evidence: {', '.join(c.evidence)}.{overlay_text}"
+        )
+    return lead + "\n\n" + "\n".join(bullets)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -554,6 +679,162 @@ async def reason(req: ReasonRequest):
         if "connection" in msg.lower() or "connect" in msg.lower():
             raise HTTPException(status_code=503, detail=f"Cannot reach LLM provider ({PROVIDER}). Is it running? {msg[:200]}")
         raise HTTPException(status_code=500, detail=f"LLM error ({PROVIDER}/{active_model()}): {msg[:300]}")
+
+
+@app.post("/repurpose", response_model=RepurposeResponse)
+async def repurpose(req: RepurposeRequest):
+    disease = req.disease.strip()
+    if not disease:
+        raise HTTPException(status_code=400, detail="Disease cannot be empty.")
+
+    limit = max(3, min(req.limit, 25))
+    keyword = _keyword(disease)
+
+    direct_cypher = """
+    MATCH (cand:Drug)-[:TARGETS]->(g:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
+    WHERE toLower(dis.name) CONTAINS toLower($keyword)
+      AND NOT EXISTS {
+        MATCH (cand)-[:INDICATED_FOR]->(approved:Disease)
+        WHERE toLower(approved.name) CONTAINS toLower($keyword)
+      }
+    RETURN cand.name AS drug,
+           collect(DISTINCT g.name)[0..8] AS genes,
+           count(DISTINCT g) AS gene_count,
+           collect(DISTINCT dis.name)[0..5] AS diseases
+    ORDER BY gene_count DESC, drug
+    LIMIT $limit
+    """
+    ppi_cypher = """
+    MATCH (cand:Drug)-[:TARGETS]->(g1:Gene)-[:PROTEIN_PROTEIN_INTERACTION]-(g2:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
+    WHERE toLower(dis.name) CONTAINS toLower($keyword)
+      AND NOT EXISTS {
+        MATCH (cand)-[:INDICATED_FOR]->(approved:Disease)
+        WHERE toLower(approved.name) CONTAINS toLower($keyword)
+      }
+    RETURN cand.name AS drug,
+           collect(DISTINCT g1.name)[0..8] AS genes,
+           collect(DISTINCT g2.name)[0..8] AS via_genes,
+           count(DISTINCT g2) AS proximity_count,
+           collect(DISTINCT dis.name)[0..5] AS diseases
+    ORDER BY proximity_count DESC, drug
+    LIMIT $limit
+    """
+    trial_cypher = """
+    MATCH (cand:Drug)-[:HAS_INDIAN_TRIAL]->(t:ClinicalTrial)-[:INVESTIGATES_DISEASE]->(dis:Disease)
+    WHERE toLower(dis.name) CONTAINS toLower($keyword)
+      AND t.status IN ["RECRUITING", "ACTIVE_NOT_RECRUITING", "COMPLETED"]
+    RETURN cand.name AS drug,
+           collect(DISTINCT {
+             nct_id: t.nct_id,
+             title: t.title,
+             status: t.status,
+             phase: t.phase,
+             india_sites: t.india_sites
+           })[0..3] AS trials
+    LIMIT 30
+    """
+    pgx_cypher = """
+    MATCH (v:Variant)-[:AFFECTS_RESPONSE]->(cand:Drug)
+    RETURN cand.name AS drug,
+           collect(DISTINCT {
+             variant: v.name,
+             af_india: v.af_india,
+             af_global: v.af_global,
+             note: v.clinical_note
+           })[0..3] AS pgx_flags
+    LIMIT 200
+    """
+    imppat_cypher = """
+    MATCH (p:Phytochemical)-[:HAS_TRADITIONAL_USE]->(dis:Disease)
+    WHERE toLower(dis.name) CONTAINS toLower($keyword)
+    RETURN p.name AS compound, collect(DISTINCT dis.name)[0..3] AS uses
+    LIMIT 10
+    """
+
+    cypher_steps = [
+        {"step": "Direct target overlap excluding already indicated drugs", "cypher": direct_cypher.strip()},
+        {"step": "PPI-mediated proximity from drug targets to disease genes", "cypher": ppi_cypher.strip()},
+        {"step": "Indian clinical trial overlay", "cypher": trial_cypher.strip()},
+        {"step": "Indian PGx safety overlay", "cypher": pgx_cypher.strip()},
+        {"step": "IMPPAT traditional-use overlap", "cypher": imppat_cypher.strip()},
+    ]
+
+    try:
+        params = {"keyword": keyword, "limit": limit}
+        direct = run_cypher_params(direct_cypher, params)
+        ppi = run_cypher_params(ppi_cypher, params)
+        trials = run_cypher_params(trial_cypher, {"keyword": keyword})
+        pgx = run_cypher_params(pgx_cypher, {})
+        imppat = run_cypher_params(imppat_cypher, {"keyword": keyword})
+    except neo4j_exc.Neo4jError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    by_drug: dict[str, dict[str, Any]] = {}
+    for row in direct:
+        drug = row.get("drug")
+        if not drug:
+            continue
+        entry = by_drug.setdefault(drug, {"score": 0, "genes": [], "via_genes": [], "evidence": [], "trials": [], "pgx_flags": []})
+        entry["genes"].extend(row.get("genes", []))
+        entry["score"] += 4 + int(row.get("gene_count", 0))
+        entry["evidence"].append(f"direct target overlap with {row.get('gene_count', 0)} disease gene(s)")
+
+    for row in ppi:
+        drug = row.get("drug")
+        if not drug:
+            continue
+        entry = by_drug.setdefault(drug, {"score": 0, "genes": [], "via_genes": [], "evidence": [], "trials": [], "pgx_flags": []})
+        entry["genes"].extend(row.get("genes", []))
+        entry["via_genes"].extend(row.get("via_genes", []))
+        proximity = int(row.get("proximity_count", 0))
+        entry["score"] += 2 + min(proximity, 6)
+        entry["evidence"].append(f"PPI proximity to {proximity} disease gene(s)")
+
+    for row in trials:
+        drug = row.get("drug")
+        if drug in by_drug:
+            trial_list = row.get("trials", [])
+            by_drug[drug]["trials"] = trial_list
+            if trial_list:
+                by_drug[drug]["score"] += 3
+                by_drug[drug]["evidence"].append("Indian clinical trial evidence")
+
+    for row in pgx:
+        drug = row.get("drug")
+        if drug in by_drug:
+            flags = row.get("pgx_flags", [])
+            by_drug[drug]["pgx_flags"] = flags
+            if flags:
+                by_drug[drug]["score"] += 1
+                by_drug[drug]["evidence"].append("Indian PGx safety context available")
+
+    if imppat:
+        for entry in by_drug.values():
+            entry["score"] += 1
+            entry["evidence"].append("IMPPAT disease-context overlap exists")
+
+    candidates = [
+        RepurposeCandidate(
+            drug=drug,
+            score=int(data["score"]),
+            confidence=_confidence(int(data["score"])),
+            evidence=_uniq(data["evidence"], 6),
+            genes=_uniq(data["genes"], 8),
+            via_genes=_uniq(data["via_genes"], 8),
+            trials=data["trials"][:3],
+            pgx_flags=data["pgx_flags"][:3],
+        )
+        for drug, data in by_drug.items()
+    ]
+    candidates.sort(key=lambda c: (-c.score, c.drug.lower()))
+    candidates = candidates[:limit]
+
+    return RepurposeResponse(
+        answer=_format_repurpose_answer(disease, keyword, candidates),
+        paths=_build_candidate_paths(candidates, disease),
+        cypher_steps=cypher_steps,
+        candidates=candidates,
+    )
 
 
 class CypherRequest(BaseModel):
