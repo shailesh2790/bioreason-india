@@ -11,6 +11,10 @@ data/
 *.csv
 *.tsv
 
+# Exception: ship curated seed datasets needed at runtime
+!pipeline/data/
+!pipeline/data/**
+
 # ── Strategic / private docs (never commit) ──────────────────────────────
 STRATEGY.md
 *_prd.md
