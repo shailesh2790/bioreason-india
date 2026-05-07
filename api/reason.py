@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import anthropic
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 from neo4j import exceptions as neo4j_exc
@@ -979,6 +979,221 @@ from api.rare import router as rare_router  # noqa: E402
 app.include_router(patient_router)
 app.include_router(pgx_router)
 app.include_router(rare_router)
+
+
+# ---------------------------------------------------------------------------
+# Admin: load curated IMPPAT phytochemical dataset (Session A — Ayurvedic Validation v2)
+# ---------------------------------------------------------------------------
+
+class LoadImppatResponse(BaseModel):
+    csv_rows: int
+    phytochemicals_created: int
+    phytochemicals_merged_with_drug: int
+    targets_edges: int
+    traditional_use_edges: int
+    cyp_edges: int
+    skipped_target_genes: list[str]
+    final_phytochemical_count: int
+    final_traditional_use_edge_count: int
+    final_targets_from_phytochemical_count: int
+
+
+def _split_multi(value: str) -> list[str]:
+    if not value or value.lower() == "nan":
+        return []
+    return [item.strip() for item in value.replace(",", ";").split(";") if item.strip()]
+
+
+_USE_TO_DISEASE_KEYWORD = {
+    "anti-diabetic": "diabetes",
+    "anti-inflammatory": "inflammation",
+    "anti-cancer": "cancer",
+    "anti-tumor": "neoplasm",
+    "neuroprotective": "neurodegeneration",
+    "anti-alzheimer": "alzheimer",
+    "anti-malarial": "malaria",
+    "anti-parasitic": "parasitic",
+    "anti-viral": "viral",
+    "anti-infective": "infection",
+    "anti-bacterial": "bacterial",
+    "anti-fungal": "fungal",
+    "anti-diarrheal": "diarrhea",
+    "cardioprotective": "heart",
+    "anti-hypertensive": "hypertension",
+    "anti-arthritic": "arthritis",
+    "anti-asthmatic": "asthma",
+    "anti-epileptic": "epilepsy",
+    "anti-anxiety": "anxiety",
+    "anxiolytic": "anxiety",
+    "anti-depressant": "depression",
+    "cognitive-enhancer": "cognitive",
+    "immunostimulant": "immune",
+    "adaptogenic": "stress",
+    "anti-stress": "stress",
+    "antioxidant": "oxidative",
+    "hepatoprotective": "liver",
+    "anti-ulcer": "ulcer",
+    "anti-osteoporotic": "osteoporosis",
+    "phytoestrogen": "estrogen",
+    "wound-healing": "wound",
+    "analgesic": "pain",
+    "anti-emetic": "nausea",
+    "hypolipidemic": "hyperlipidemia",
+    "weight-management": "obesity",
+    "cardiotonic": "heart failure",
+    "anti-glaucoma": "glaucoma",
+    "bioavailability-enhancer": "absorption",
+}
+
+
+@app.post("/admin/load_imppat", response_model=LoadImppatResponse)
+async def admin_load_imppat(x_admin_token: str = Header(default="")):
+    """Load the curated IMPPAT phytochemical CSV into Neo4j.
+
+    Idempotent — uses MERGE so re-running updates rather than duplicates.
+    Auth: X-Admin-Token header must match ADMIN_TOKEN env var.
+    """
+    expected = os.getenv("ADMIN_TOKEN", "")
+    if not expected or x_admin_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Token")
+
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pipeline", "data", "imppat_curated.csv")
+    if not os.path.exists(csv_path):
+        raise HTTPException(status_code=500, detail=f"Curated CSV not found at {csv_path}")
+
+    import csv as csv_mod
+
+    with open(csv_path, encoding="utf-8") as f:
+        rows = list(csv_mod.DictReader(f))
+
+    created = merged = target_edges = use_edges = cyp_edges = 0
+    skipped: set[str] = set()
+
+    with neo4j_driver().session() as session:
+        for row in rows:
+            name = (row.get("compound_name") or "").strip()
+            if not name:
+                continue
+            imppat_id = (row.get("imppat_id") or f"IMPPAT_{name.upper().replace(' ', '_')}").strip()
+
+            props = {
+                "imppat_id": imppat_id,
+                "name": name,
+                "sanskrit_name": (row.get("sanskrit_name") or "").strip(),
+                "botanical_source": (row.get("botanical_source") or "").strip(),
+                "family": (row.get("family") or "").strip(),
+                "plant_part": (row.get("plant_part") or "").strip(),
+                "marker_compound": (row.get("marker_compound") or "").strip(),
+                "cas_number": (row.get("cas_number") or "").strip(),
+                "molecular_formula": (row.get("molecular_formula") or "").strip(),
+                "molecular_weight": (row.get("molecular_weight") or "").strip(),
+                "therapeutic_uses": (row.get("therapeutic_uses") or "").strip(),
+                "pathways": (row.get("pathways") or "").strip(),
+                "safety_notes": (row.get("safety_notes") or "").strip(),
+                "evidence_level": (row.get("evidence_level") or "literature_curated").strip(),
+                "source": "IMPPAT_curated",
+            }
+
+            existing_drug = session.run(
+                "MATCH (d:Drug) WHERE toLower(d.name) = toLower($name) RETURN d.id AS id LIMIT 1",
+                name=name,
+            ).single()
+
+            if existing_drug:
+                session.run(
+                    """
+                    MATCH (d:Drug {id: $id})
+                    SET d:Phytochemical
+                    SET d += $props
+                    """,
+                    id=existing_drug["id"], props=props,
+                )
+                compound_id = existing_drug["id"]
+                merged += 1
+            else:
+                node_id = f"phyto:{imppat_id}"
+                session.run(
+                    """
+                    MERGE (p:Phytochemical {id: $id})
+                    SET p += $props
+                    """,
+                    id=node_id, props=props,
+                )
+                compound_id = node_id
+                created += 1
+
+            for use in _split_multi(row.get("therapeutic_uses", "")):
+                keyword = _USE_TO_DISEASE_KEYWORD.get(use.lower(), use.replace("anti-", "").replace("-", " "))
+                disease = session.run(
+                    "MATCH (d:Disease) WHERE toLower(d.name) CONTAINS toLower($k) RETURN d.id AS id LIMIT 1",
+                    k=keyword[:40],
+                ).single()
+                if disease:
+                    session.run(
+                        """
+                        MATCH (p {id: $cid})
+                        MATCH (d:Disease {id: $did})
+                        MERGE (p)-[r:HAS_TRADITIONAL_USE]->(d)
+                        SET r.use_term = $use, r.source = 'IMPPAT_curated'
+                        """,
+                        cid=compound_id, did=disease["id"], use=use,
+                    )
+                    use_edges += 1
+
+            for gene_symbol in _split_multi(row.get("target_genes", "")):
+                gene = session.run(
+                    "MATCH (g:Gene) WHERE toUpper(g.name) = toUpper($s) RETURN g.id AS id LIMIT 1",
+                    s=gene_symbol,
+                ).single()
+                if not gene:
+                    skipped.add(gene_symbol)
+                    continue
+                session.run(
+                    """
+                    MATCH (p {id: $cid})
+                    MATCH (g:Gene {id: $gid})
+                    MERGE (p)-[r:TARGETS]->(g)
+                    SET r.source = 'IMPPAT_curated', r.evidence_level = $ev
+                    """,
+                    cid=compound_id, gid=gene["id"], ev=props["evidence_level"],
+                )
+                target_edges += 1
+
+            for cyp in _split_multi(row.get("cyp_interactions", "")):
+                cyp_gene = session.run(
+                    "MATCH (g:Gene) WHERE toUpper(g.name) = toUpper($s) RETURN g.id AS id LIMIT 1",
+                    s=cyp,
+                ).single()
+                if cyp_gene:
+                    session.run(
+                        """
+                        MATCH (p {id: $cid})
+                        MATCH (g:Gene {id: $gid})
+                        MERGE (p)-[r:METABOLIZED_BY]->(g)
+                        SET r.source = 'IMPPAT_curated'
+                        """,
+                        cid=compound_id, gid=cyp_gene["id"],
+                    )
+                    cyp_edges += 1
+
+        final_phyto = session.run("MATCH (p:Phytochemical) RETURN count(p) AS c").single()["c"]
+        final_use = session.run("MATCH ()-[r:HAS_TRADITIONAL_USE]->() RETURN count(r) AS c").single()["c"]
+        final_targets = session.run(
+            "MATCH (p:Phytochemical)-[r:TARGETS]->(:Gene) RETURN count(r) AS c"
+        ).single()["c"]
+
+    return LoadImppatResponse(
+        csv_rows=len(rows),
+        phytochemicals_created=created,
+        phytochemicals_merged_with_drug=merged,
+        targets_edges=target_edges,
+        traditional_use_edges=use_edges,
+        cyp_edges=cyp_edges,
+        skipped_target_genes=sorted(skipped),
+        final_phytochemical_count=final_phyto,
+        final_traditional_use_edge_count=final_use,
+        final_targets_from_phytochemical_count=final_targets,
+    )
 
 
 if __name__ == "__main__":
