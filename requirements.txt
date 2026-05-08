@@ -8,3 +8,5 @@ python-dotenv>=1.0.0
 tqdm>=4.67.0
 openai>=1.50.0
 python-multipart>=0.0.9
+firebase-admin>=6.5.0
+google-cloud-firestore>=2.18.0

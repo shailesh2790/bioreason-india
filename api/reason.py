@@ -1281,17 +1281,35 @@ async def run_cypher_endpoint(req: CypherRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/auth/whoami")
+async def whoami(authorization: str = Header(default="")):
+    """Verify a Firebase ID token. Public endpoint — used by the frontend to
+    confirm that the user's session is valid and to surface backend errors."""
+    from api.firebase_auth import is_configured, verify_user
+    if not is_configured():
+        return {"configured": False, "user": None}
+    if not authorization:
+        return {"configured": True, "user": None}
+    try:
+        user = await verify_user(authorization)
+        return {"configured": True, "user": user}
+    except HTTPException as e:
+        return {"configured": True, "user": None, "error": e.detail}
+
+
 @app.get("/health")
 async def health():
     try:
         results = run_cypher("MATCH (n) RETURN count(n) AS count LIMIT 1")
         count = results[0].get("count", 0) if results else 0
+        from api.firebase_auth import is_configured as _auth_ok
         return {
             "status": "ok",
             "neo4j": "connected",
             "node_count": count,
             "llm_provider": PROVIDER,
             "llm_model": active_model(),
+            "auth_configured": _auth_ok(),
         }
     except Exception as exc:
         return {"status": "degraded", "neo4j": str(exc), "llm_provider": PROVIDER}

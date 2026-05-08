@@ -4,6 +4,12 @@
 .env.*.local
 *.pem
 *.key
+# Firebase service account keys — NEVER commit
+bioreason.json
+bioreason-*.json
+firebase-adminsdk*.json
+*-service-account*.json
+*-firebase-adminsdk*.json
 
 # ── Data (large files — download via pipeline scripts) ──────────────────
 /data/
