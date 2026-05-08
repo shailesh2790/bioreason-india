@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Link from "next/link";
 import ThemeToggle from "../components/ThemeToggle";
+import NavAuth from "../components/NavAuth";
+import { AuthProvider } from "../lib/auth";
 import "./globals.css";
 
 const THEME_INIT_SCRIPT = `
@@ -41,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body style={{ background: "var(--bg)", minHeight: "100vh" }}>
+        <AuthProvider>
 
         {/* Navigation */}
         <nav style={{
@@ -97,8 +100,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   {label}
                 </Link>
               ))}
-              <div style={{ marginLeft: 8 }}>
+              <div style={{ marginLeft: 8, display: "flex", alignItems: "center", gap: 8 }}>
                 <ThemeToggle />
+                <NavAuth />
               </div>
             </div>
 
@@ -107,6 +111,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {children}
 
+        </AuthProvider>
       </body>
     </html>
   );
