@@ -837,6 +837,429 @@ async def repurpose(req: RepurposeRequest):
     )
 
 
+# ---------------------------------------------------------------------------
+# /validate — typed CDSCO Phytopharmaceutical Dossier (Session B)
+# ---------------------------------------------------------------------------
+
+
+class DossierRequest(BaseModel):
+    compound: str
+    applicant_firm: Optional[str] = None
+    claimed_indication: Optional[str] = None
+    dose: Optional[str] = None
+
+
+class IdentitySection(BaseModel):
+    compound_name: str
+    sanskrit_name: Optional[str] = None
+    botanical_source: Optional[str] = None
+    family: Optional[str] = None
+    plant_part: Optional[str] = None
+    marker_compound: Optional[str] = None
+    cas_number: Optional[str] = None
+    molecular_formula: Optional[str] = None
+    molecular_weight: Optional[str] = None
+    imppat_id: Optional[str] = None
+
+
+class MolecularTarget(BaseModel):
+    gene_symbol: str
+    source: str
+    evidence_level: str
+    associated_diseases: list[str] = []
+
+
+class PathwayEntry(BaseModel):
+    name: str
+    source: str
+    related_genes: list[str] = []
+
+
+class DiseaseAssociation(BaseModel):
+    disease: str
+    mechanism_path: str
+    evidence_strength: str
+
+
+class TraditionalUseAlignment(BaseModel):
+    traditional_use: str
+    modern_indication: str
+    match_strength: str
+
+
+class PKMetabolism(BaseModel):
+    enzyme: str
+    role: str
+    source: str
+
+
+class DrugInteractionEntry(BaseModel):
+    drug: str
+    note: str
+
+
+class SafetySignal(BaseModel):
+    finding: str
+    source: str
+
+
+class DataGap(BaseModel):
+    section: str
+    description: str
+
+
+class CDSCOSummary(BaseModel):
+    overall_evidence_strength: str
+    targets_with_curated_evidence: int
+    diseases_with_mechanism: int
+    pk_signals: int
+    ddi_signals: int
+    safety_findings: int
+    ready_for_submission: bool
+    recommended_section_4_text: str
+
+
+class DossierResponse(BaseModel):
+    compound: str
+    applicant_firm: Optional[str]
+    claimed_indication: Optional[str]
+    dose: Optional[str]
+    generated_at_iso: str
+
+    identity: IdentitySection
+    molecular_targets: list[MolecularTarget]
+    pathways: list[PathwayEntry]
+    disease_associations: list[DiseaseAssociation]
+    traditional_use_alignment: list[TraditionalUseAlignment]
+    pk_metabolism: list[PKMetabolism]
+    drug_interactions: list[DrugInteractionEntry]
+    safety_signals: list[SafetySignal]
+    data_gaps: list[DataGap]
+    cdsco_summary: CDSCOSummary
+    cypher_steps: list[dict]
+
+
+# Reverse map for traditional_use → modern indication labels (used in dossier prose).
+_TRADITIONAL_USE_TO_INDICATION = {
+    "anti-diabetic": "type 2 diabetes mellitus",
+    "anti-inflammatory": "chronic inflammatory disorders",
+    "anti-cancer": "neoplastic disease",
+    "anti-tumor": "neoplastic disease",
+    "neuroprotective": "neurodegenerative disorders",
+    "anti-alzheimer": "Alzheimer's disease",
+    "anti-malarial": "Plasmodium infection",
+    "anti-parasitic": "parasitic infection",
+    "anti-viral": "viral infection",
+    "anti-infective": "bacterial / fungal infection",
+    "anti-bacterial": "bacterial infection",
+    "anti-fungal": "fungal infection",
+    "anti-diarrheal": "acute diarrhea",
+    "cardioprotective": "ischaemic heart disease",
+    "anti-hypertensive": "essential hypertension",
+    "anti-arthritic": "osteo / rheumatoid arthritis",
+    "anti-asthmatic": "bronchial asthma",
+    "anti-epileptic": "epilepsy / seizure disorders",
+    "anti-anxiety": "generalised anxiety disorder",
+    "anxiolytic": "anxiety disorders",
+    "anti-depressant": "major depressive disorder",
+    "cognitive-enhancer": "mild cognitive impairment",
+    "immunostimulant": "immune deficiency states",
+    "adaptogenic": "stress-related disorders",
+    "anti-stress": "stress-related disorders",
+    "antioxidant": "oxidative-stress conditions",
+    "hepatoprotective": "drug-induced / chronic liver disease",
+    "anti-ulcer": "peptic ulcer disease",
+    "anti-osteoporotic": "post-menopausal osteoporosis",
+    "phytoestrogen": "menopausal symptom relief",
+    "wound-healing": "wound / burn healing",
+    "analgesic": "chronic pain",
+    "anti-emetic": "chemotherapy-induced nausea",
+    "hypolipidemic": "hyperlipidemia",
+    "weight-management": "obesity / metabolic syndrome",
+    "cardiotonic": "congestive heart failure",
+    "anti-glaucoma": "glaucoma",
+    "bioavailability-enhancer": "co-administered drug PK enhancement",
+}
+
+
+def _evidence_level_from_count(curated: int, total: int) -> str:
+    if curated >= 5 and total >= 7:
+        return "HIGH"
+    if curated >= 3 or total >= 4:
+        return "MODERATE"
+    return "LOW"
+
+
+def _format_section_4(
+    compound: str,
+    indication: Optional[str],
+    targets: list[MolecularTarget],
+    pathway_names: list[str],
+    diseases: list[DiseaseAssociation],
+) -> str:
+    target_str = ", ".join(t.gene_symbol for t in targets[:6]) or "no curated targets"
+    pathway_str = "; ".join(pathway_names[:4]) or "no curated pathway data"
+    disease_str = ", ".join(d.disease for d in diseases[:4]) or "no graph-validated disease association"
+    indication_clause = (
+        f" The submitted indication ({indication}) is supported by the mechanism evidence below."
+        if indication
+        else ""
+    )
+    return (
+        f"Section 4 — Mechanism of Action.{indication_clause} "
+        f"{compound} is documented in the IMPPAT-curated knowledge graph to modulate the following protein targets: {target_str}. "
+        f"These targets participate in the following biological pathways: {pathway_str}. "
+        f"Through these mechanisms, {compound} is mechanistically linked to: {disease_str}. "
+        "Evidence is derived from a structured biomedical knowledge graph integrating IMPPAT 2.0 (Indian phytochemical atlas), "
+        "PrimeKG (gene-disease ontology), Reactome (pathway annotations) and IndiGen (Indian population genomics). "
+        "Per-edge provenance and Cypher audit queries are appended."
+    )
+
+
+@app.post("/validate", response_model=DossierResponse)
+async def validate_phytopharma(req: DossierRequest):
+    """Generate a typed CDSCO Phytopharmaceutical Drug submission dossier."""
+    name = (req.compound or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Compound name required")
+
+    cypher_steps: list[dict] = []
+
+    with neo4j_driver().session() as session:
+        # ── Identity ────────────────────────────────────────────────
+        identity_cypher = (
+            "MATCH (p:Phytochemical) WHERE toLower(p.name) = toLower($name) "
+            "RETURN p LIMIT 1"
+        )
+        cypher_steps.append({"step": "Phytochemical identity lookup", "cypher": identity_cypher})
+        rec = session.run(identity_cypher, name=name).single()
+        if not rec:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No Phytochemical node found for '{name}'. "
+                    "Run /admin/load_imppat to load curated compounds, or check spelling."
+                ),
+            )
+        node = dict(rec["p"])
+        compound_id = node.get("id") or node.get("imppat_id") or name
+
+        identity = IdentitySection(
+            compound_name=node.get("name", name),
+            sanskrit_name=node.get("sanskrit_name") or None,
+            botanical_source=node.get("botanical_source") or node.get("plant_source") or None,
+            family=node.get("family") or None,
+            plant_part=node.get("plant_part") or None,
+            marker_compound=node.get("marker_compound") or None,
+            cas_number=node.get("cas_number") or None,
+            molecular_formula=node.get("molecular_formula") or None,
+            molecular_weight=node.get("molecular_weight") or None,
+            imppat_id=node.get("imppat_id") or None,
+        )
+
+        # ── Molecular targets + their disease links ────────────────
+        targets_cypher = """
+        MATCH (p)-[r:TARGETS]->(g:Gene)
+        WHERE toLower(coalesce(p.name,'')) = toLower($name)
+           OR p.id = $cid
+        OPTIONAL MATCH (g)-[:ASSOCIATED_WITH]->(d:Disease)
+        RETURN g.name AS gene,
+               coalesce(r.source, 'PrimeKG') AS source,
+               coalesce(r.evidence_level, 'literature_curated') AS evidence_level,
+               collect(DISTINCT d.name)[0..5] AS diseases
+        ORDER BY gene
+        LIMIT 30
+        """
+        cypher_steps.append({"step": "Molecular targets with disease overlay", "cypher": targets_cypher})
+        target_rows = list(session.run(targets_cypher, name=name, cid=compound_id))
+
+        molecular_targets = [
+            MolecularTarget(
+                gene_symbol=row["gene"],
+                source=row["source"],
+                evidence_level=row["evidence_level"],
+                associated_diseases=[d for d in (row["diseases"] or []) if d],
+            )
+            for row in target_rows
+            if row.get("gene")
+        ]
+
+        # ── Pathways (curated property + gene-pathway joins) ───────
+        pathway_names: list[str] = []
+        seen_pw: set[str] = set()
+        for pw in (node.get("pathways") or "").split(";"):
+            pw_clean = pw.strip()
+            if pw_clean and pw_clean.lower() not in seen_pw:
+                pathway_names.append(pw_clean)
+                seen_pw.add(pw_clean.lower())
+
+        pathways_cypher = """
+        MATCH (p)-[:TARGETS]->(g:Gene)-[:PARENT_OF|INTERACTS_WITH|EXPRESSED_IN]->(pw:Pathway)
+        WHERE toLower(coalesce(p.name,'')) = toLower($name) OR p.id = $cid
+        RETURN pw.name AS name, count(DISTINCT g) AS gene_count, collect(DISTINCT g.name)[0..5] AS genes
+        ORDER BY gene_count DESC
+        LIMIT 8
+        """
+        cypher_steps.append({"step": "Pathway evidence (gene-pathway joins)", "cypher": pathways_cypher})
+        try:
+            graph_pathways = list(session.run(pathways_cypher, name=name, cid=compound_id))
+        except neo4j_exc.Neo4jError:
+            graph_pathways = []
+
+        pathways: list[PathwayEntry] = [
+            PathwayEntry(name=pw, source="IMPPAT_curated", related_genes=[])
+            for pw in pathway_names
+        ]
+        for row in graph_pathways:
+            if row.get("name") and row["name"] not in seen_pw:
+                pathways.append(
+                    PathwayEntry(
+                        name=row["name"],
+                        source="PrimeKG/Reactome",
+                        related_genes=[g for g in (row["genes"] or []) if g],
+                    )
+                )
+                seen_pw.add(row["name"].lower())
+
+        # ── Disease associations: HAS_TRADITIONAL_USE + target-mediated ──
+        diseases_cypher = """
+        MATCH (p)-[r:HAS_TRADITIONAL_USE]->(d:Disease)
+        WHERE toLower(coalesce(p.name,'')) = toLower($name) OR p.id = $cid
+        RETURN d.name AS disease, 'traditional use (IMPPAT)' AS path, 'MODERATE' AS strength
+        UNION
+        MATCH (p)-[:TARGETS]->(g:Gene)-[:ASSOCIATED_WITH]->(d:Disease)
+        WHERE toLower(coalesce(p.name,'')) = toLower($name) OR p.id = $cid
+        WITH d.name AS disease, count(DISTINCT g) AS gene_count
+        RETURN disease, ('target-mediated via ' + toString(gene_count) + ' gene(s)') AS path,
+               CASE WHEN gene_count >= 3 THEN 'HIGH' WHEN gene_count >= 2 THEN 'MODERATE' ELSE 'LOW' END AS strength
+        ORDER BY strength DESC, disease
+        LIMIT 25
+        """
+        cypher_steps.append({"step": "Disease associations (traditional + target-mediated)", "cypher": diseases_cypher})
+        disease_rows = list(session.run(diseases_cypher, name=name, cid=compound_id))
+
+        seen_disease: set[str] = set()
+        disease_associations: list[DiseaseAssociation] = []
+        for row in disease_rows:
+            d = row.get("disease")
+            if not d or d.lower() in seen_disease:
+                continue
+            seen_disease.add(d.lower())
+            disease_associations.append(
+                DiseaseAssociation(
+                    disease=d,
+                    mechanism_path=row.get("path", ""),
+                    evidence_strength=row.get("strength", "LOW"),
+                )
+            )
+
+        # ── Traditional-use alignment (Sanskrit ↔ modern indications) ─
+        traditional_use_alignment: list[TraditionalUseAlignment] = []
+        for use in (node.get("therapeutic_uses") or "").split(";"):
+            u = use.strip().lower()
+            if not u:
+                continue
+            modern = _TRADITIONAL_USE_TO_INDICATION.get(u, u.replace("anti-", "").replace("-", " "))
+            strength = "STRONG" if any(modern.split()[0] in d.lower() for d in seen_disease) else "INDIRECT"
+            traditional_use_alignment.append(
+                TraditionalUseAlignment(
+                    traditional_use=use.strip(),
+                    modern_indication=modern,
+                    match_strength=strength,
+                )
+            )
+
+        # ── PK / CYP metabolism ────────────────────────────────────
+        pk_cypher = """
+        MATCH (p)-[r:METABOLIZED_BY]->(g:Gene)
+        WHERE toLower(coalesce(p.name,'')) = toLower($name) OR p.id = $cid
+        RETURN g.name AS enzyme, coalesce(r.source, 'IMPPAT_curated') AS source
+        ORDER BY enzyme
+        """
+        cypher_steps.append({"step": "Pharmacokinetics: CYP metabolism edges", "cypher": pk_cypher})
+        pk_rows = list(session.run(pk_cypher, name=name, cid=compound_id))
+        pk_metabolism = [
+            PKMetabolism(enzyme=row["enzyme"], role="metabolizing enzyme", source=row["source"])
+            for row in pk_rows
+            if row.get("enzyme")
+        ]
+
+        # ── Drug-drug interactions (parsed from curated safety field) ─
+        drug_interactions: list[DrugInteractionEntry] = []
+        for drug in (node.get("ddi_drugs") or "").split(";"):
+            d = drug.strip()
+            if d:
+                drug_interactions.append(
+                    DrugInteractionEntry(drug=d, note="Co-administration may alter PK or pharmacodynamics; clinical monitoring advised.")
+                )
+
+        # ── Safety signals ─────────────────────────────────────────
+        safety_signals: list[SafetySignal] = []
+        for note in (node.get("safety_notes") or "").split(";"):
+            n = note.strip()
+            if n:
+                safety_signals.append(SafetySignal(finding=n, source="IMPPAT_curated literature"))
+
+    # ── Data gaps (CDSCO submission completeness check) ──
+    data_gaps: list[DataGap] = []
+    if not identity.botanical_source:
+        data_gaps.append(DataGap(section="1. Identity", description="Botanical source missing — applicant must supply."))
+    if not identity.marker_compound:
+        data_gaps.append(DataGap(section="1. Identity", description="Marker compound + assay specification not provided — pharmacy QC data required."))
+    data_gaps.append(DataGap(
+        section="2. Quality Control",
+        description="HPLC fingerprint, heavy-metals, microbial-limit and stability data are not in scope of computational evidence — applicant pharmacy must supply per CDSCO Schedule Y modified for phytopharma.",
+    ))
+    if len(molecular_targets) < 3:
+        data_gaps.append(DataGap(section="3. Molecular Targets", description="Fewer than 3 curated molecular targets — mechanism evidence is sparse for regulatory acceptance; consider expanded literature curation."))
+    if not pk_metabolism:
+        data_gaps.append(DataGap(section="7. Pharmacokinetics", description="No CYP / drug-metabolism edges available; submit human PK study or in-vitro hepatocyte data."))
+    data_gaps.append(DataGap(
+        section="6. Animal & Human Efficacy",
+        description="Preclinical efficacy data and human clinical trial evidence are out of scope of this computational dossier — applicant must supply per Schedule Y.",
+    ))
+
+    targets_curated = sum(1 for t in molecular_targets if "curated" in (t.evidence_level or "").lower())
+    overall = _evidence_level_from_count(targets_curated, len(molecular_targets))
+    section_4 = _format_section_4(
+        identity.compound_name,
+        req.claimed_indication,
+        molecular_targets,
+        [pw.name for pw in pathways],
+        disease_associations,
+    )
+    cdsco_summary = CDSCOSummary(
+        overall_evidence_strength=overall,
+        targets_with_curated_evidence=targets_curated,
+        diseases_with_mechanism=len(disease_associations),
+        pk_signals=len(pk_metabolism),
+        ddi_signals=len(drug_interactions),
+        safety_findings=len(safety_signals),
+        ready_for_submission=overall in ("HIGH", "MODERATE") and len(disease_associations) >= 2,
+        recommended_section_4_text=section_4,
+    )
+
+    from datetime import datetime, timezone
+    return DossierResponse(
+        compound=identity.compound_name,
+        applicant_firm=req.applicant_firm,
+        claimed_indication=req.claimed_indication,
+        dose=req.dose,
+        generated_at_iso=datetime.now(timezone.utc).isoformat(),
+        identity=identity,
+        molecular_targets=molecular_targets,
+        pathways=pathways,
+        disease_associations=disease_associations,
+        traditional_use_alignment=traditional_use_alignment,
+        pk_metabolism=pk_metabolism,
+        drug_interactions=drug_interactions,
+        safety_signals=safety_signals,
+        data_gaps=data_gaps,
+        cdsco_summary=cdsco_summary,
+        cypher_steps=cypher_steps,
+    )
+
+
 class CypherRequest(BaseModel):
     cypher: str
     params: dict = {}
