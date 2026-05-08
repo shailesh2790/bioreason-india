@@ -6,14 +6,12 @@
 *.key
 
 # ── Data (large files — download via pipeline scripts) ──────────────────
-data/
+/data/
 *.dump
-*.csv
-*.tsv
-
-# Exception: ship curated seed datasets needed at runtime
-!pipeline/data/
-!pipeline/data/**
+/*.csv
+/*.tsv
+src/**/*.csv
+src/**/*.tsv
 
 # ── Strategic / private docs (never commit) ──────────────────────────────
 STRATEGY.md
