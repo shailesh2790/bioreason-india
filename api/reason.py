@@ -1026,9 +1026,11 @@ async def validate_phytopharma(req: DossierRequest):
     cypher_steps: list[dict] = []
 
     with neo4j_driver().session() as session:
-        # ── Identity ────────────────────────────────────────────────
+        # ── Identity (prefer the richest node when duplicates exist) ────
         identity_cypher = (
             "MATCH (p:Phytochemical) WHERE toLower(p.name) = toLower($name) "
+            "WITH p, size(keys(p)) AS prop_count "
+            "ORDER BY prop_count DESC "
             "RETURN p LIMIT 1"
         )
         cypher_steps.append({"step": "Phytochemical identity lookup", "cypher": identity_cypher})
@@ -1410,6 +1412,7 @@ app.include_router(rare_router)
 
 class LoadImppatResponse(BaseModel):
     csv_rows: int
+    legacy_stubs_deleted: int = 0
     phytochemicals_created: int
     phytochemicals_merged_with_drug: int
     targets_edges: int
@@ -1490,9 +1493,26 @@ async def admin_load_imppat(x_admin_token: str = Header(default="")):
         rows = list(csv_mod.DictReader(f))
 
     created = merged = target_edges = use_edges = cyp_edges = 0
+    legacy_stubs_deleted = 0
     skipped: set[str] = set()
 
     with neo4j_driver().session() as session:
+        # Cleanup pass: delete legacy sample-loader Phytochemical stubs that were
+        # created before the curated load. Stubs are identified by a missing
+        # botanical_source AND missing sanskrit_name (the curated load always sets one).
+        cleanup = session.run(
+            """
+            MATCH (p:Phytochemical)
+            WHERE (p.botanical_source IS NULL OR p.botanical_source = '')
+              AND (p.sanskrit_name IS NULL OR p.sanskrit_name = '')
+              AND (p.marker_compound IS NULL OR p.marker_compound = '')
+            DETACH DELETE p
+            RETURN count(*) AS deleted
+            """
+        ).single()
+        if cleanup:
+            legacy_stubs_deleted = cleanup["deleted"]
+
         for row in rows:
             name = (row.get("compound_name") or "").strip()
             if not name:
@@ -1607,6 +1627,7 @@ async def admin_load_imppat(x_admin_token: str = Header(default="")):
 
     return LoadImppatResponse(
         csv_rows=len(rows),
+        legacy_stubs_deleted=legacy_stubs_deleted,
         phytochemicals_created=created,
         phytochemicals_merged_with_drug=merged,
         targets_edges=target_edges,
