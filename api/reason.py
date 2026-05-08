@@ -1057,7 +1057,7 @@ async def admin_load_imppat(x_admin_token: str = Header(default="")):
     if not expected or x_admin_token != expected:
         raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Token")
 
-    csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pipeline", "data", "imppat_curated.csv")
+    csv_path = os.path.join(os.path.dirname(__file__), "data", "imppat_curated.csv")
     if not os.path.exists(csv_path):
         raise HTTPException(status_code=500, detail=f"Curated CSV not found at {csv_path}")
 

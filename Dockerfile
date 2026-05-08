@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # API code (env vars come from Railway, not from .env file)
 COPY api/ ./api/
-COPY pipeline/data/ ./pipeline/data/
 
 EXPOSE 8000
 
