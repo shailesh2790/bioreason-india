@@ -260,10 +260,17 @@ Return ONLY a valid JSON array with 3 or fewer elements. No markdown, no explana
 
 SYNTHESIS_SYSTEM = """You are a biomedical research assistant synthesising knowledge graph results for a pharmaceutical researcher.
 
+GROUNDING CONTRACT (non-negotiable):
+- You MUST NOT name any drug, gene, pathway, disease, variant, or phytochemical that does not appear in the provided cypher_steps result rows.
+- You MUST NOT extrapolate biological connections that are not explicitly present as edges in the result rows.
+- If the cypher_steps results are empty or sparse (fewer than 3 result rows total across all steps), the answer MUST be:
+    "The knowledge graph returned no direct evidence for this query. Cypher steps attempted: <list>. Likely cause: <disease term not in graph | sparse subnetwork | query too specific>. Try one of: <if you can suggest from result rows, do so; otherwise say 'a more general disease/drug term'>."
+- If a specific entity in the question (e.g. 'MDR-TB', 'breast cancer subtype X') has no exact graph match, state that explicitly. Do not synthesize a confident answer about it.
+
 Format your answer as:
-1. One-paragraph lead: the key biological finding
+1. One-paragraph lead: the key biological finding (only from actual result rows)
 2. For each path found, one bullet: mechanism → confidence (HIGH/MEDIUM/LOW) → source databases
-3. If Variant nodes appear: add a "Indian PGx Context" section with allele frequencies and clinical implications
+3. If Variant nodes appear: add an "Indian PGx Context" section with allele frequencies and clinical implications
 
 Confidence scale:
   HIGH   = 3+ curated edges from named databases (DrugBank, UniProt, Reactome, IMPPAT)
@@ -276,9 +283,8 @@ If Variant nodes are in results, always report:
 - clinical_note from the variant
 - which drugs are most affected and how
 
-If no paths were found, explain what the graph attempted to traverse and what data gaps exist.
 Cite database sources for each relationship (e.g. "DrugBank TREATS edge", "IMPPAT HAS_TRADITIONAL_USE edge", "IndiGen AFFECTS_RESPONSE edge").
-Be concise and actionable. For pharmacogenomics questions, include specific dosing or drug-selection guidance."""
+Be concise and honest about evidence gaps. Never fabricate."""
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +331,8 @@ class RepurposeCandidate(BaseModel):
 
 class RepurposeResponse(ReasonResponse):
     candidates: list[RepurposeCandidate]
+    resolved_disease: Optional[dict] = None
+    suggestions: list[dict] = []
 
 
 # ---------------------------------------------------------------------------
@@ -644,12 +652,33 @@ async def reason(req: ReasonRequest):
             step_results.append(entry)
 
         # --- Step 3: LLM synthesises results into plain-language answer ---
-        results_payload = json.dumps(step_results, default=str)[:8000]
-        answer = llm_complete(
-            system=SYNTHESIS_SYSTEM,
-            user=f"Question: {req.question}\n\nKnowledge graph query results:\n{results_payload}",
-            max_tokens=2000,
-        )
+        # Hallucination guard: if all steps returned empty/sparse rows, short-circuit.
+        total_rows = sum(s.get("result_count", 0) for s in step_results)
+        if total_rows < 2:
+            attempted = "; ".join(f"\"{s.get('step','')}\"" for s in step_results)
+            # Try to suggest closest disease nodes from the question
+            from api.entity_resolver import resolve_disease
+            with neo4j_driver().session() as _rs:
+                resolved = resolve_disease(req.question, _rs)
+            sugg = [s.get("name") for s in resolved.get("suggestions", []) if s.get("name")]
+            sugg_text = (
+                "Closest disease nodes in our graph: " + ", ".join(sugg[:5]) + "."
+                if sugg
+                else "Try a more general or canonical disease/drug term."
+            )
+            answer = (
+                "The knowledge graph returned no direct evidence for this query.\n\n"
+                f"Cypher steps attempted: {attempted}.\n\n"
+                f"Likely cause: the entity in your question may not have a matching node, or the relationship pattern is too narrow for the loaded graph.\n\n"
+                f"{sugg_text}"
+            )
+        else:
+            results_payload = json.dumps(step_results, default=str)[:8000]
+            answer = llm_complete(
+                system=SYNTHESIS_SYSTEM,
+                user=f"Question: {req.question}\n\nKnowledge graph query results:\n{results_payload}",
+                max_tokens=2000,
+            )
 
         return ReasonResponse(
             answer=answer,
@@ -688,7 +717,15 @@ async def repurpose(req: RepurposeRequest):
         raise HTTPException(status_code=400, detail="Disease cannot be empty.")
 
     limit = max(3, min(req.limit, 25))
-    keyword = _keyword(disease)
+
+    # Resolve user disease term to a graph-grounded keyword + canonical node
+    from api.entity_resolver import resolve_disease
+    with neo4j_driver().session() as _resolve_sess:
+        resolved = resolve_disease(disease, _resolve_sess)
+    if resolved.get("exact_node"):
+        keyword = resolved["exact_node"]["name"]
+    else:
+        keyword = resolved.get("canonical") or _keyword(disease)
 
     direct_cypher = """
     MATCH (cand:Drug)-[:TARGETS]->(g:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
@@ -829,11 +866,25 @@ async def repurpose(req: RepurposeRequest):
     candidates.sort(key=lambda c: (-c.score, c.drug.lower()))
     candidates = candidates[:limit]
 
+    # If nothing landed, augment the answer with explicit "no evidence + suggestions"
+    answer_prose = _format_repurpose_answer(disease, keyword, candidates)
+    if not candidates:
+        sugg_names = [s.get("name") for s in resolved.get("suggestions", []) if s.get("name")]
+        if sugg_names:
+            answer_prose += (
+                "\n\nNo direct or PPI-proximity drug candidates were found in the graph for the resolved keyword "
+                f"'{keyword}'. Closest disease nodes in the graph: "
+                + ", ".join(sugg_names[:5])
+                + ". Try one of those as the input."
+            )
+
     return RepurposeResponse(
-        answer=_format_repurpose_answer(disease, keyword, candidates),
+        answer=answer_prose,
         paths=_build_candidate_paths(candidates, disease),
         cypher_steps=cypher_steps,
         candidates=candidates,
+        resolved_disease=resolved,
+        suggestions=resolved.get("suggestions", []),
     )
 
 
@@ -1260,6 +1311,27 @@ async def validate_phytopharma(req: DossierRequest):
         cdsco_summary=cdsco_summary,
         cypher_steps=cypher_steps,
     )
+
+
+class ResolveRequest(BaseModel):
+    term: str
+    label: str = "Disease"  # Disease | Drug | Gene | Phytochemical | Pathway
+
+
+@app.post("/resolve")
+async def resolve_entity_endpoint(req: ResolveRequest):
+    """Resolve a free-text term to a canonical graph node + did-you-mean suggestions.
+
+    Used by the UI to disambiguate before submitting heavier queries.
+    """
+    from api.entity_resolver import resolve_node, resolve_disease
+    if not req.term or not req.term.strip():
+        raise HTTPException(status_code=400, detail="term cannot be empty")
+    label = req.label or "Disease"
+    with neo4j_driver().session() as session:
+        if label == "Disease":
+            return resolve_disease(req.term.strip(), session)
+        return resolve_node(req.term.strip(), label, session)
 
 
 class CypherRequest(BaseModel):
