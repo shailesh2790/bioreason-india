@@ -136,15 +136,25 @@ def normalize(term: str) -> str:
 
 
 def lookup_synonym(term: str, kind: str = "disease") -> Optional[str]:
-    """If `term` is a known synonym for `kind`, return canonical search keyword."""
+    """If `term` is a known synonym for `kind`, return canonical search keyword.
+
+    Single-token phrases (e.g. "as", "tb", "ad") require an exact whole-token
+    match against the input — never a substring match — so we don't spuriously
+    map "asdfqwer" to "ankylosing spondylitis" via the "as" key.
+    Multi-word phrases (e.g. "mdr tb") may match as a substring.
+    """
     n = normalize(term)
     table = DISEASE_SYNONYMS if kind == "disease" else {}
     if n in table:
         return table[n]
-    # Try sub-phrases for multi-word matches
+    n_tokens = set(n.split())
     for phrase, canon in table.items():
-        if phrase in n:
-            return canon
+        if " " in phrase:  # multi-word — substring is OK
+            if phrase in n:
+                return canon
+        else:  # single token — require whole-token match
+            if phrase in n_tokens:
+                return canon
     return None
 
 
