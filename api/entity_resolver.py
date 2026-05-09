@@ -32,18 +32,20 @@ DISEASE_SYNONYMS: dict[str, str] = {
     "pulmonary tuberculosis": "tuberculosis",
     "extra pulmonary tuberculosis": "tuberculosis",
 
-    # Diabetes variants
-    "t1d": "type 1 diabetes",
-    "t1dm": "type 1 diabetes",
-    "type i diabetes": "type 1 diabetes",
-    "t2d": "type 2 diabetes",
-    "t2dm": "type 2 diabetes",
-    "type ii diabetes": "type 2 diabetes",
-    "diabetes": "diabetes mellitus",
-    "diabetes mellitus": "diabetes mellitus",
-    "madhumeha": "diabetes mellitus",
-    "non insulin dependent diabetes": "type 2 diabetes",
-    "insulin dependent diabetes": "type 1 diabetes",
+    # Diabetes variants — PrimeKG has no plain "diabetes mellitus" node;
+    # broad keyword "diabetes" matches 47 specific subtypes (most relevant)
+    "t1d": "diabetes",
+    "t1dm": "diabetes",
+    "type i diabetes": "diabetes",
+    "type 1 diabetes": "diabetes",
+    "t2d": "diabetes",
+    "t2dm": "diabetes",
+    "type ii diabetes": "diabetes",
+    "type 2 diabetes": "diabetes",
+    "diabetes mellitus": "diabetes",
+    "madhumeha": "diabetes",
+    "non insulin dependent diabetes": "diabetes",
+    "insulin dependent diabetes": "diabetes",
 
     # Cancer abbreviations
     "hcc": "hepatocellular carcinoma",
@@ -59,13 +61,15 @@ DISEASE_SYNONYMS: dict[str, str] = {
     "her2 positive breast cancer": "breast carcinoma",
     "breast cancer": "breast carcinoma",
 
-    # Neurological
-    "ad": "alzheimer disease",
-    "alzheimers": "alzheimer disease",
-    "alzheimer's disease": "alzheimer disease",
-    "smritibhramsa": "alzheimer disease",
-    "pd": "parkinson disease",
-    "parkinson's disease": "parkinson disease",
+    # Neurological — keep broad keywords; PrimeKG has subtype variants
+    "ad": "alzheimer",
+    "alzheimers": "alzheimer",
+    "alzheimers disease": "alzheimer",
+    "alzheimer disease": "alzheimer",
+    "smritibhramsa": "alzheimer",
+    "pd": "parkinson",
+    "parkinsons disease": "parkinson",
+    "parkinson disease": "parkinson",
     "ms": "multiple sclerosis",
     "als": "amyotrophic lateral sclerosis",
     "drug resistant epilepsy": "epilepsy",
@@ -88,13 +92,15 @@ DISEASE_SYNONYMS: dict[str, str] = {
     "ra": "rheumatoid arthritis",
     "sandhivata": "arthritis",
     "oa": "osteoarthritis",
-    "ibd": "inflammatory bowel disease",
-    "ibs": "irritable bowel syndrome",
+    "arthritis": "arthritis",
+    "ibd": "inflammatory bowel",
+    "ibs": "irritable bowel",
     "uc": "ulcerative colitis",
     "psa": "psoriatic arthritis",
     "as": "ankylosing spondylitis",
-    "sle": "systemic lupus erythematosus",
-    "lupus": "systemic lupus erythematosus",
+    "sle": "lupus",
+    "lupus": "lupus",
+    "systemic lupus erythematosus": "lupus",
 
     # Respiratory
     "copd": "chronic obstructive pulmonary disease",
@@ -215,10 +221,11 @@ def resolve_disease(term: str, session: Optional[Any] = None) -> dict:
         out["suggestions"] = [{"id": r["id"], "name": r["name"]} for r in contains[1:]]
         return out
 
-    # Fall back: token-level OR match for "did you mean" suggestions
+    # Fall back: ALL meaningful tokens must match (not OR — that returned
+    # spurious matches like "thymoma type B" for token "type" alone).
     tokens = [t for t in canon.split() if len(t) > 3]
     if tokens:
-        suggest_q = " OR ".join([f"toLower(d.name) CONTAINS '{t.lower()}'" for t in tokens[:3]])
+        suggest_q = " AND ".join([f"toLower(d.name) CONTAINS '{t.lower()}'" for t in tokens[:3]])
         suggest = list(session.run(
             f"MATCH (d:Disease) WHERE {suggest_q} "
             "RETURN d.id AS id, d.name AS name "
