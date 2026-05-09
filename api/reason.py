@@ -718,14 +718,14 @@ async def repurpose(req: RepurposeRequest):
 
     limit = max(3, min(req.limit, 25))
 
-    # Resolve user disease term to a graph-grounded keyword + canonical node
+    # Resolve user disease term to a graph-grounded keyword + canonical node.
+    # Prefer the broad canonical keyword for Cypher CONTAINS matching — the
+    # resolver's exact_node may be a narrow subtype (e.g. "monogenic diabetes")
+    # while we want to search across all matching subtypes ("diabetes").
     from api.entity_resolver import resolve_disease
     with neo4j_driver().session() as _resolve_sess:
         resolved = resolve_disease(disease, _resolve_sess)
-    if resolved.get("exact_node"):
-        keyword = resolved["exact_node"]["name"]
-    else:
-        keyword = resolved.get("canonical") or _keyword(disease)
+    keyword = resolved.get("canonical") or _keyword(disease)
 
     direct_cypher = """
     MATCH (cand:Drug)-[:TARGETS]->(g:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
