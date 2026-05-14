@@ -335,6 +335,40 @@ class RepurposeResponse(ReasonResponse):
     suggestions: list[dict] = []
 
 
+# ── HerbCheck (V2-A) ────────────────────────────────────────────────────────
+
+class HerbCheckRequest(BaseModel):
+    drugs: list[str]
+    herbs: list[str]
+    cyp2c19_genotype: Optional[str] = None   # extensive | intermediate | poor | rapid | ultra-rapid
+    cyp2d6_genotype: Optional[str] = None
+    cyp3a4_variant: Optional[str] = None
+    indian_population: bool = True
+
+
+class HerbDrugInteraction(BaseModel):
+    herb: str
+    herb_resolved_compound: Optional[str] = None
+    imppat_id: Optional[str] = None
+    drug: str
+    severity: str                            # HIGH | MODERATE | LOW | NONE
+    shared_cyps: list[str]
+    mechanism: str
+    predicted_binding: dict                   # source-tagged; "literature_curated" until V2-B
+    indian_pgx_flags: list[dict]
+    evidence_grade: str                       # A | B | C | D
+    confidence: float
+    action: str
+
+
+class HerbCheckResponse(BaseModel):
+    interactions: list[HerbDrugInteraction]
+    unresolved_herbs: list[str]
+    unresolved_drugs: list[str]
+    summary: dict
+    cypher_steps: list[dict]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1309,6 +1343,195 @@ async def validate_phytopharma(req: DossierRequest):
         safety_signals=safety_signals,
         data_gaps=data_gaps,
         cdsco_summary=cdsco_summary,
+        cypher_steps=cypher_steps,
+    )
+
+
+# ── HerbCheck (V2-A) endpoint ───────────────────────────────────────────────
+
+# Severity action template — keyed by (severity, has_pgx_modifier)
+_HERBCHECK_ACTION = {
+    "HIGH": "Avoid concomitant use OR active monitoring with dose adjustment. PGx-mediated risk amplified.",
+    "MODERATE": "Monitor for additive PK effects (e.g. INR, drug levels). Consider 50% dose review at 7 days.",
+    "LOW": "Single shared CYP pathway. Observe for additive effects; no immediate action required.",
+    "NONE": "No shared CYP metabolic pathway detected in the curated graph.",
+}
+
+
+def _resolve_herb_to_compounds(session, herb_term: str, top_n: int = 3) -> list[dict]:
+    """Find top phytochemical(s) for a herb. Matches by name, sanskrit_name, or botanical_source."""
+    rows = list(session.run(
+        """
+        MATCH (p:Phytochemical)
+        WHERE toLower(p.name) = toLower($q)
+           OR toLower(p.sanskrit_name) = toLower($q)
+           OR (p.sanskrit_name IS NOT NULL AND toLower(p.sanskrit_name) CONTAINS toLower($q))
+           OR (p.botanical_source IS NOT NULL AND toLower(p.botanical_source) CONTAINS toLower($q))
+           OR toLower(p.name) CONTAINS toLower($q)
+        RETURN p.id AS id, p.name AS name, p.imppat_id AS imppat_id,
+               p.sanskrit_name AS sanskrit_name, p.botanical_source AS botanical_source,
+               p.therapeutic_uses AS uses
+        ORDER BY
+          CASE WHEN toLower(p.name) = toLower($q) THEN 0
+               WHEN toLower(p.sanskrit_name) = toLower($q) THEN 1
+               ELSE 2 END
+        LIMIT $n
+        """,
+        q=herb_term, n=top_n,
+    ))
+    return [dict(r) for r in rows]
+
+
+def _shared_cyps(session, compound_id: str, drug_name: str) -> tuple[list[str], list[dict]]:
+    """Return (shared_cyp_names, pgx_variant_flags) for a phytochemical × drug pair."""
+    rows = list(session.run(
+        """
+        MATCH (p {id: $cid})-[:METABOLIZED_BY]->(cyp:Gene)
+        WHERE cyp.name STARTS WITH 'CYP'
+        MATCH (d:Drug)-[:METABOLIZED_BY]->(cyp)
+        WHERE toLower(d.name) = toLower($drug)
+        OPTIONAL MATCH (v:Variant)-[:IN_GENE|HAS_VARIANT]-(cyp)
+        RETURN cyp.name AS cyp,
+               collect(DISTINCT {
+                 variant: v.name,
+                 af_india: v.af_india,
+                 af_global: v.af_global,
+                 note: v.clinical_note
+               }) AS variants
+        """,
+        cid=compound_id, drug=drug_name,
+    ))
+    shared = [r["cyp"] for r in rows]
+    variants: list[dict] = []
+    for r in rows:
+        for v in r.get("variants", []):
+            if v.get("variant"):
+                variants.append({**v, "gene": r["cyp"]})
+    return shared, variants
+
+
+def _score_severity(shared_cyps: list[str], pgx_variants: list[dict], patient: HerbCheckRequest) -> tuple[str, float]:
+    n = len(shared_cyps)
+    pgx_modifier = 0
+
+    # Apply patient PGx context — poor metabolizers amplify CYP-mediated interactions
+    for cyp in shared_cyps:
+        if cyp == "CYP2C19" and patient.cyp2c19_genotype in ("poor", "intermediate"):
+            pgx_modifier += 2
+        elif cyp == "CYP2D6" and patient.cyp2d6_genotype in ("poor", "intermediate"):
+            pgx_modifier += 2
+        elif cyp == "CYP3A4" and patient.cyp3a4_variant:
+            pgx_modifier += 1
+
+    # Indian-population variants present at significant frequency
+    for v in pgx_variants:
+        afi = v.get("af_india")
+        try:
+            if afi and float(afi) >= 0.05:
+                pgx_modifier += 1
+        except (TypeError, ValueError):
+            pass
+
+    score = n + pgx_modifier
+    confidence = min(0.5 + 0.1 * n + 0.05 * pgx_modifier, 0.95)
+
+    if score >= 4:
+        return "HIGH", confidence
+    if score >= 2:
+        return "MODERATE", confidence
+    if score >= 1:
+        return "LOW", confidence
+    return "NONE", 0.4
+
+
+@app.post("/herbcheck", response_model=HerbCheckResponse)
+async def herb_check(req: HerbCheckRequest):
+    if not req.herbs or not req.drugs:
+        raise HTTPException(status_code=400, detail="Both 'herbs' and 'drugs' arrays must be non-empty.")
+
+    interactions: list[HerbDrugInteraction] = []
+    unresolved_herbs: list[str] = []
+    unresolved_drugs: list[str] = list(req.drugs)
+    cypher_steps: list[dict] = [
+        {"step": "Resolve herb → phytochemical (by name / Sanskrit / botanical source)", "cypher": "MATCH (p:Phytochemical) WHERE toLower(p.name)=$q OR toLower(p.sanskrit_name) CONTAINS $q OR toLower(p.botanical_source) CONTAINS $q RETURN p LIMIT 3"},
+        {"step": "Find shared CYP enzymes between phytochemical and drug", "cypher": "MATCH (p)-[:METABOLIZED_BY]->(cyp:Gene)<-[:METABOLIZED_BY]-(d:Drug) WHERE cyp.name STARTS WITH 'CYP' AND d.name = $drug RETURN cyp.name, collect(variants)"},
+        {"step": "Score severity from #shared CYPs + IndiGen variants + patient PGx context", "cypher": "(application-side scoring)"},
+    ]
+
+    with neo4j_driver().session() as session:
+        for herb in req.herbs:
+            compounds = _resolve_herb_to_compounds(session, herb, top_n=3)
+            if not compounds:
+                unresolved_herbs.append(herb)
+                continue
+
+            for drug in req.drugs:
+                # Check the drug exists in graph at all
+                drug_row = session.run(
+                    "MATCH (d:Drug) WHERE toLower(d.name) = toLower($q) RETURN d.name AS name LIMIT 1",
+                    q=drug,
+                ).single()
+                if not drug_row:
+                    continue
+                drug_canonical = drug_row["name"]
+                if drug in unresolved_drugs:
+                    unresolved_drugs.remove(drug)
+
+                for cpd in compounds:
+                    shared, variants = _shared_cyps(session, cpd["id"], drug_canonical)
+                    severity, confidence = _score_severity(shared, variants, req)
+
+                    if severity == "NONE":
+                        continue
+
+                    direction = "shared metabolic pathway"
+                    mechanism = (
+                        f"{cpd['name']} and {drug_canonical} compete for the same CYP enzyme(s): "
+                        f"{', '.join(shared)}. {direction} predicted from PrimeKG METABOLIZED_BY edges."
+                    )
+
+                    evidence_grade = "B" if len(shared) >= 2 else "C"
+                    if any(v.get("af_india") for v in variants):
+                        evidence_grade = "A" if evidence_grade in ("A", "B") else "B"
+
+                    interactions.append(HerbDrugInteraction(
+                        herb=herb,
+                        herb_resolved_compound=cpd["name"],
+                        imppat_id=cpd.get("imppat_id"),
+                        drug=drug_canonical,
+                        severity=severity,
+                        shared_cyps=shared,
+                        mechanism=mechanism,
+                        predicted_binding={
+                            "source": "literature_curated",
+                            "model": "PrimeKG METABOLIZED_BY edges (V2-A)",
+                            "note": "Real MAMMAL pKd predictions land in V2-B after local Colab/laptop run.",
+                        },
+                        indian_pgx_flags=variants[:3],
+                        evidence_grade=evidence_grade,
+                        confidence=round(confidence, 2),
+                        action=_HERBCHECK_ACTION[severity],
+                    ))
+                    break  # one interaction per herb-drug pair (top compound)
+
+    # Sort: HIGH first, then MODERATE, then LOW
+    order = {"HIGH": 0, "MODERATE": 1, "LOW": 2, "NONE": 3}
+    interactions.sort(key=lambda x: (order[x.severity], -x.confidence))
+
+    sev_counts = {s: sum(1 for i in interactions if i.severity == s) for s in ("HIGH", "MODERATE", "LOW")}
+    summary = {
+        "highest_severity": interactions[0].severity if interactions else "NONE",
+        "interaction_count": len(interactions),
+        "severity_counts": sev_counts,
+        "indian_specific_risk": any(i.indian_pgx_flags for i in interactions),
+        "evidence_grades": {g: sum(1 for i in interactions if i.evidence_grade == g) for g in ("A", "B", "C", "D")},
+    }
+
+    return HerbCheckResponse(
+        interactions=interactions,
+        unresolved_herbs=unresolved_herbs,
+        unresolved_drugs=unresolved_drugs,
+        summary=summary,
         cypher_steps=cypher_steps,
     )
 
