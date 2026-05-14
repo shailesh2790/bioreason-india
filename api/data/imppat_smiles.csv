@@ -1,0 +1,31 @@
+imppat_id,compound_name,smiles,smiles_source
+IMPPAT001,Curcumin,COc1cc(/C=C/C(=O)CC(=O)/C=C/c2ccc(O)c(OC)c2)ccc1O,PubChem CID 969516
+IMPPAT002,Withaferin A,CC1=C2[C@@H](CC[C@H](C)[C@H]3CC[C@@H]4[C@@]2(CO4)C(=O)C=C1)[C@@H]5CC(=O)O[C@H]5CO,PubChem CID 265237
+IMPPAT003,Andrographolide,C[C@]12CC[C@@H]3[C@H](CCC(=C)C3=O)[C@@]1(CC[C@@H]2C(=C)/C=C/C4=CC(=O)OC4)CO,PubChem CID 5318517
+IMPPAT004,Boswellic acid,CC1(C)CC[C@@]2(C(=O)O)CC[C@]3(C)C(=CC[C@@H]4[C@@]3(C)CC[C@H]5C(C)(C)[C@@H](O)CC[C@@]45C)[C@@H]2C1,PubChem CID 168928
+IMPPAT005,Berberine,COc1ccc2cc3[n+]4cc5c(OC)c(OC)cc(c5cc4ccc3cc2c1OC)CC4,PubChem CID 2353
+IMPPAT006,Piperine,O=C(/C=C/C=C/c1ccc2c(c1)OCO2)N1CCCCC1,PubChem CID 638024
+IMPPAT007,Quercetin,O=c1c(O)c(-c2ccc(O)c(O)c2)oc2cc(O)cc(O)c12,PubChem CID 5280343
+IMPPAT008,Bacosides,,Complex saponin mixture - manual SMILES required
+IMPPAT009,Capsaicin,COc1cc(CNC(=O)CCCC/C=C/C(C)C)ccc1O,PubChem CID 1548943
+IMPPAT010,Eugenol,C=CCc1ccc(O)c(OC)c1,PubChem CID 3314
+IMPPAT011,EGCG,O=C(O[C@@H]1Cc2c(O)cc(O)cc2O[C@H]1c1cc(O)c(O)c(O)c1)c1cc(O)c(O)c(O)c1,PubChem CID 65064
+IMPPAT012,Resveratrol,Oc1ccc(/C=C/c2cc(O)cc(O)c2)cc1,PubChem CID 445154
+IMPPAT013,Galantamine,COc1ccc2c3c1O[C@@H]1C=C[C@@H](O)C[C@@H]31CCN(C)CC2,PubChem CID 9651
+IMPPAT014,Glycyrrhizin,,Large triterpene glycoside - manual SMILES required
+IMPPAT015,Mangiferin,OC[C@H]1O[C@H](c2c(O)cc(O)c3c2C(=O)c2cc(O)c(O)cc2O3)[C@H](O)[C@@H](O)[C@@H]1O,PubChem CID 5281647
+IMPPAT016,Asiaticoside,,Complex triterpene glycoside - manual SMILES required
+IMPPAT017,Picroside,,Complex iridoid glycoside - manual SMILES required
+IMPPAT018,Forskolin,CC(=O)O[C@H]1CC(=O)[C@]2(C)C(=C)CC[C@@]3(O)[C@H]2[C@@H]1OC(C)(C)[C@@H]3O,PubChem CID 47936
+IMPPAT019,Allicin,C=CCSS(=O)CC=C,PubChem CID 65036
+IMPPAT020,Gingerol,CCCCC[C@@H](O)CC(=O)CCc1ccc(O)c(OC)c1,PubChem CID 442793
+IMPPAT021,Apigenin,O=c1cc(-c2ccc(O)cc2)oc2cc(O)cc(O)c12,PubChem CID 5280443
+IMPPAT022,Luteolin,O=c1cc(-c2ccc(O)c(O)c2)oc2cc(O)cc(O)c12,PubChem CID 5280445
+IMPPAT023,Genistein,O=c1c(-c2ccc(O)cc2)coc2cc(O)cc(O)c12,PubChem CID 5280961
+IMPPAT024,Trigonelline,C[n+]1cccc(C(=O)[O-])c1,PubChem CID 5570
+IMPPAT025,Crocin,,Complex carotenoid glycoside - manual SMILES required
+IMPPAT026,Cinnamaldehyde,O=C/C=C/c1ccccc1,PubChem CID 637511
+IMPPAT027,Carvacrol,Cc1ccc(C(C)C)cc1O,PubChem CID 10364
+IMPPAT028,Ellagic acid,O=c1oc2c(O)c(O)cc3c2c1oc1c(O)c(O)cc-31,PubChem CID 5281855
+IMPPAT029,Thymoquinone,CC1=CC(=O)C(C(C)C)=CC1=O,PubChem CID 10281
+IMPPAT030,Tinosporin,,Complex diterpenoid - manual SMILES required

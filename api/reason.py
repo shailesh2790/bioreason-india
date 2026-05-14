@@ -1382,8 +1382,10 @@ def _resolve_herb_to_compounds(session, herb_term: str, top_n: int = 3) -> list[
     return [dict(r) for r in rows]
 
 
-def _shared_cyps(session, compound_id: str, drug_name: str) -> tuple[list[str], list[dict]]:
-    """Return (shared_cyp_names, pgx_variant_flags) for a phytochemical × drug pair."""
+def _shared_cyps(session, compound_id: str, drug_name: str) -> tuple[list[str], list[dict], dict]:
+    """Return (shared_cyp_names, pgx_variant_flags, mammal_predictions) for a phytochemical × drug pair.
+
+    mammal_predictions is {cyp_name: {pkd, ic50_nM, binding_class}} if MAMMAL edges exist."""
     rows = list(session.run(
         """
         MATCH (p {id: $cid})-[:METABOLIZED_BY]->(cyp:Gene)
@@ -1391,23 +1393,36 @@ def _shared_cyps(session, compound_id: str, drug_name: str) -> tuple[list[str], 
         MATCH (d:Drug)-[:METABOLIZED_BY]->(cyp)
         WHERE toLower(d.name) = toLower($drug)
         OPTIONAL MATCH (v:Variant)-[:IN_GENE|HAS_VARIANT]-(cyp)
+        OPTIONAL MATCH (p)-[mb:PREDICTED_BINDING]->(cyp)
         RETURN cyp.name AS cyp,
                collect(DISTINCT {
                  variant: v.name,
                  af_india: v.af_india,
                  af_global: v.af_global,
                  note: v.clinical_note
-               }) AS variants
+               }) AS variants,
+               mb.pkd AS pkd,
+               mb.ic50_nM AS ic50_nM,
+               mb.binding_class AS binding_class,
+               mb.model AS model
         """,
         cid=compound_id, drug=drug_name,
     ))
     shared = [r["cyp"] for r in rows]
     variants: list[dict] = []
+    mammal: dict = {}
     for r in rows:
         for v in r.get("variants", []):
             if v.get("variant"):
                 variants.append({**v, "gene": r["cyp"]})
-    return shared, variants
+        if r.get("pkd") is not None:
+            mammal[r["cyp"]] = {
+                "pkd": r["pkd"],
+                "ic50_nM": r.get("ic50_nM"),
+                "binding_class": r.get("binding_class"),
+                "model": r.get("model"),
+            }
+    return shared, variants, mammal
 
 
 def _score_severity(shared_cyps: list[str], pgx_variants: list[dict], patient: HerbCheckRequest) -> tuple[str, float]:
@@ -1478,21 +1493,54 @@ async def herb_check(req: HerbCheckRequest):
                     unresolved_drugs.remove(drug)
 
                 for cpd in compounds:
-                    shared, variants = _shared_cyps(session, cpd["id"], drug_canonical)
+                    shared, variants, mammal_preds = _shared_cyps(session, cpd["id"], drug_canonical)
                     severity, confidence = _score_severity(shared, variants, req)
 
                     if severity == "NONE":
                         continue
 
-                    direction = "shared metabolic pathway"
                     mechanism = (
                         f"{cpd['name']} and {drug_canonical} compete for the same CYP enzyme(s): "
-                        f"{', '.join(shared)}. {direction} predicted from PrimeKG METABOLIZED_BY edges."
+                        f"{', '.join(shared)}. Shared metabolic pathway from PrimeKG METABOLIZED_BY edges."
                     )
 
-                    evidence_grade = "B" if len(shared) >= 2 else "C"
-                    if any(v.get("af_india") for v in variants):
-                        evidence_grade = "A" if evidence_grade in ("A", "B") else "B"
+                    # Evidence grade: A if MAMMAL strong binders present AND IndiGen variants overlap;
+                    # B if either; C otherwise.
+                    has_pgx = any(v.get("af_india") for v in variants)
+                    strong_mammal = any(
+                        (mp.get("pkd") or 0) >= 6.0 for mp in mammal_preds.values()
+                    )
+                    if strong_mammal and has_pgx:
+                        evidence_grade = "A"
+                    elif strong_mammal or has_pgx or len(shared) >= 3:
+                        evidence_grade = "B"
+                    elif len(shared) >= 2:
+                        evidence_grade = "C"
+                    else:
+                        evidence_grade = "D"
+
+                    # Augment mechanism prose with MAMMAL pKd when available
+                    if mammal_preds:
+                        top_cyp = max(mammal_preds, key=lambda c: mammal_preds[c]["pkd"])
+                        top_pkd = mammal_preds[top_cyp]["pkd"]
+                        mechanism += (
+                            f" MAMMAL DTI: strongest predicted binding at {top_cyp} "
+                            f"(pKd {top_pkd:.2f}, {mammal_preds[top_cyp].get('binding_class','—')})."
+                        )
+
+                    if mammal_preds:
+                        predicted_binding = {
+                            "source": "MAMMAL_dti",
+                            "model": "MAMMAL 458M DTI BindingDB-pKd",
+                            "per_cyp": mammal_preds,
+                            "note": "Real model-predicted pKd from V2-B run.",
+                        }
+                    else:
+                        predicted_binding = {
+                            "source": "literature_curated",
+                            "model": "PrimeKG METABOLIZED_BY edges (V2-A)",
+                            "note": "No MAMMAL predictions loaded for this compound. Run V2-B notebook.",
+                        }
 
                     interactions.append(HerbDrugInteraction(
                         herb=herb,
@@ -1502,11 +1550,7 @@ async def herb_check(req: HerbCheckRequest):
                         severity=severity,
                         shared_cyps=shared,
                         mechanism=mechanism,
-                        predicted_binding={
-                            "source": "literature_curated",
-                            "model": "PrimeKG METABOLIZED_BY edges (V2-A)",
-                            "note": "Real MAMMAL pKd predictions land in V2-B after local Colab/laptop run.",
-                        },
+                        predicted_binding=predicted_binding,
                         indian_pgx_flags=variants[:3],
                         evidence_grade=evidence_grade,
                         confidence=round(confidence, 2),
@@ -1950,6 +1994,107 @@ async def admin_load_imppat(x_admin_token: str = Header(default="")):
         final_phytochemical_count=final_phyto,
         final_traditional_use_edge_count=final_use,
         final_targets_from_phytochemical_count=final_targets,
+    )
+
+
+# ── /admin/load_mammal_predictions (V2-B) ───────────────────────────────────
+
+class LoadMammalResponse(BaseModel):
+    csv_rows: int
+    predicted_binding_edges: int
+    skipped_unmatched_compounds: list[str]
+    skipped_unmatched_cyps: list[str]
+    final_predicted_binding_count: int
+
+
+@app.post("/admin/load_mammal_predictions", response_model=LoadMammalResponse)
+async def admin_load_mammal_predictions(x_admin_token: str = Header(default="")):
+    """Load MAMMAL DTI pKd predictions from api/data/mammal_predictions.csv.
+
+    Each row becomes a Phytochemical -[:PREDICTED_BINDING {pkd, ic50_nM, model}]-> Gene edge.
+    Idempotent — re-running re-MERGEs and overwrites prediction props.
+    Auth: X-Admin-Token header must match ADMIN_TOKEN env var.
+    """
+    expected = os.getenv("ADMIN_TOKEN", "")
+    if not expected or x_admin_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Token")
+
+    csv_path = os.path.join(os.path.dirname(__file__), "data", "mammal_predictions.csv")
+    if not os.path.exists(csv_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"mammal_predictions.csv not found at {csv_path}. Run notebooks/herbcheck_mammal.ipynb on your laptop, commit the output, deploy, then retry.",
+        )
+
+    import csv as csv_mod
+    with open(csv_path, encoding="utf-8") as f:
+        rows = list(csv_mod.DictReader(f))
+
+    edges = 0
+    skipped_compounds: set[str] = set()
+    skipped_cyps: set[str] = set()
+
+    with neo4j_driver().session() as session:
+        for row in rows:
+            imppat_id = (row.get("imppat_id") or "").strip()
+            cyp = (row.get("cyp") or "").strip().upper()
+            try:
+                pkd = float(row.get("predicted_pkd") or 0)
+            except (TypeError, ValueError):
+                continue
+            try:
+                ic50 = float(row.get("predicted_ic50_nM") or 0) or None
+            except (TypeError, ValueError):
+                ic50 = None
+            binding_class = (row.get("binding_class") or "").strip()
+            model_name = (row.get("model") or "MAMMAL DTI").strip()
+
+            # Find phytochemical by imppat_id (idempotent)
+            phyto = session.run(
+                "MATCH (p:Phytochemical {imppat_id: $iid}) RETURN p.id AS id LIMIT 1",
+                iid=imppat_id,
+            ).single()
+            if not phyto:
+                skipped_compounds.add(imppat_id)
+                continue
+
+            # Find CYP gene
+            gene = session.run(
+                "MATCH (g:Gene) WHERE toUpper(g.name) = $c RETURN g.id AS id LIMIT 1",
+                c=cyp,
+            ).single()
+            if not gene:
+                skipped_cyps.add(cyp)
+                continue
+
+            session.run(
+                """
+                MATCH (p {id: $pid})
+                MATCH (g:Gene {id: $gid})
+                MERGE (p)-[r:PREDICTED_BINDING]->(g)
+                SET r.pkd = $pkd,
+                    r.ic50_nM = $ic50,
+                    r.binding_class = $cls,
+                    r.model = $model,
+                    r.source = 'MAMMAL',
+                    r.computed_at = $now
+                """,
+                pid=phyto["id"], gid=gene["id"], pkd=pkd, ic50=ic50,
+                cls=binding_class, model=model_name,
+                now=row.get("computed_at", ""),
+            )
+            edges += 1
+
+        final = session.run(
+            "MATCH (p:Phytochemical)-[r:PREDICTED_BINDING]->(:Gene) RETURN count(r) AS c"
+        ).single()["c"]
+
+    return LoadMammalResponse(
+        csv_rows=len(rows),
+        predicted_binding_edges=edges,
+        skipped_unmatched_compounds=sorted(skipped_compounds),
+        skipped_unmatched_cyps=sorted(skipped_cyps),
+        final_predicted_binding_count=final,
     )
 
 
