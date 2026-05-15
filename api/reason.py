@@ -1404,6 +1404,10 @@ def _shared_cyps(session, compound_id: str, drug_name: str) -> tuple[list[str], 
                mb.pkd AS pkd,
                mb.ic50_nM AS ic50_nM,
                mb.binding_class AS binding_class,
+               mb.rank_within_cyp AS rank_within_cyp,
+               mb.rank_within_compound AS rank_within_compound,
+               mb.percentile_overall AS percentile_overall,
+               mb.relative_strength AS relative_strength,
                mb.model AS model
         """,
         cid=compound_id, drug=drug_name,
@@ -1420,6 +1424,10 @@ def _shared_cyps(session, compound_id: str, drug_name: str) -> tuple[list[str], 
                 "pkd": r["pkd"],
                 "ic50_nM": r.get("ic50_nM"),
                 "binding_class": r.get("binding_class"),
+                "rank_within_cyp": r.get("rank_within_cyp"),
+                "rank_within_compound": r.get("rank_within_compound"),
+                "percentile_overall": r.get("percentile_overall"),
+                "relative_strength": r.get("relative_strength"),
                 "model": r.get("model"),
             }
     return shared, variants, mammal
@@ -1504,11 +1512,14 @@ async def herb_check(req: HerbCheckRequest):
                         f"{', '.join(shared)}. Shared metabolic pathway from PrimeKG METABOLIZED_BY edges."
                     )
 
-                    # Evidence grade: A if MAMMAL strong binders present AND IndiGen variants overlap;
-                    # B if either; C otherwise.
+                    # Evidence grade uses rank-based "strong" since absolute MAMMAL pKd
+                    # is compressed for natural products. Top-3 rank within any shared CYP
+                    # OR percentile ≥ 75 counts as "strong predicted binding".
                     has_pgx = any(v.get("af_india") for v in variants)
                     strong_mammal = any(
-                        (mp.get("pkd") or 0) >= 6.0 for mp in mammal_preds.values()
+                        (mp.get("rank_within_cyp") and mp["rank_within_cyp"] <= 3)
+                        or (mp.get("percentile_overall") or 0) >= 75
+                        for mp in mammal_preds.values()
                     )
                     if strong_mammal and has_pgx:
                         evidence_grade = "A"
@@ -1519,14 +1530,23 @@ async def herb_check(req: HerbCheckRequest):
                     else:
                         evidence_grade = "D"
 
-                    # Augment mechanism prose with MAMMAL pKd when available
+                    # Augment mechanism prose with MAMMAL rank-based readout
+                    # (absolute pKd is compressed across natural products — we report
+                    # relative rank within the 24-compound × 8-CYP screen)
                     if mammal_preds:
                         top_cyp = max(mammal_preds, key=lambda c: mammal_preds[c]["pkd"])
-                        top_pkd = mammal_preds[top_cyp]["pkd"]
-                        mechanism += (
-                            f" MAMMAL DTI: strongest predicted binding at {top_cyp} "
-                            f"(pKd {top_pkd:.2f}, {mammal_preds[top_cyp].get('binding_class','—')})."
-                        )
+                        top = mammal_preds[top_cyp]
+                        rcyp = top.get("rank_within_cyp")
+                        rcpd = top.get("rank_within_compound")
+                        pctile = top.get("percentile_overall")
+                        parts = [f"MAMMAL DTI: top predicted CYP affinity at {top_cyp} (pKd {top['pkd']:.2f}"]
+                        if rcyp:
+                            parts.append(f"rank {int(rcyp)}/24 within {top_cyp}")
+                        if rcpd:
+                            parts.append(f"rank {int(rcpd)}/8 across CYPs")
+                        if pctile is not None:
+                            parts.append(f"{pctile:.0f}th percentile overall")
+                        mechanism += " " + parts[0] + ", " + ", ".join(parts[1:]) + ")."
 
                     if mammal_preds:
                         predicted_binding = {
@@ -2067,6 +2087,21 @@ async def admin_load_mammal_predictions(x_admin_token: str = Header(default=""))
                 skipped_cyps.add(cyp)
                 continue
 
+            # Rank fields (added by Option-B post-processing)
+            try:
+                rank_cyp = int(row.get("rank_within_cyp") or 0) or None
+            except (TypeError, ValueError):
+                rank_cyp = None
+            try:
+                rank_cpd = int(row.get("rank_within_compound") or 0) or None
+            except (TypeError, ValueError):
+                rank_cpd = None
+            try:
+                pctile = float(row.get("percentile_overall") or 0) or None
+            except (TypeError, ValueError):
+                pctile = None
+            rel_strength = (row.get("relative_strength") or "").strip() or None
+
             session.run(
                 """
                 MATCH (p {id: $pid})
@@ -2075,13 +2110,18 @@ async def admin_load_mammal_predictions(x_admin_token: str = Header(default=""))
                 SET r.pkd = $pkd,
                     r.ic50_nM = $ic50,
                     r.binding_class = $cls,
+                    r.rank_within_cyp = $rcyp,
+                    r.rank_within_compound = $rcpd,
+                    r.percentile_overall = $pctile,
+                    r.relative_strength = $rel,
                     r.model = $model,
                     r.source = 'MAMMAL',
                     r.computed_at = $now
                 """,
                 pid=phyto["id"], gid=gene["id"], pkd=pkd, ic50=ic50,
-                cls=binding_class, model=model_name,
-                now=row.get("computed_at", ""),
+                cls=binding_class, rcyp=rank_cyp, rcpd=rank_cpd,
+                pctile=pctile, rel=rel_strength,
+                model=model_name, now=row.get("computed_at", ""),
             )
             edges += 1
 

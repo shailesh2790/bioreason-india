@@ -18,7 +18,20 @@ interface Interaction {
   severity: "HIGH" | "MODERATE" | "LOW" | "NONE";
   shared_cyps: string[];
   mechanism: string;
-  predicted_binding: { source: string; model?: string; note?: string };
+  predicted_binding: {
+    source: string;
+    model?: string;
+    note?: string;
+    per_cyp?: Record<string, {
+      pkd: number;
+      ic50_nM?: number;
+      binding_class?: string;
+      rank_within_cyp?: number;
+      rank_within_compound?: number;
+      percentile_overall?: number;
+      relative_strength?: string;
+    }>;
+  };
   indian_pgx_flags: PgxFlag[];
   evidence_grade: string;
   confidence: number;
@@ -290,6 +303,28 @@ export default function HerbCheckPage() {
                               {f.note && <span style={{ color: "var(--text-3)" }}>  · {f.note}</span>}
                             </p>
                           ))}
+                        </div>
+                      )}
+
+                      {it.predicted_binding.per_cyp && Object.keys(it.predicted_binding.per_cyp).length > 0 && (
+                        <div style={{ marginTop: 12, padding: "10px 12px", background: "rgba(139,92,246,0.06)", borderLeft: "3px solid var(--purple)", borderRadius: 6 }}>
+                          <p style={{ fontSize: 11, color: "var(--purple)", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 }}>MAMMAL DTI · per-CYP rank</p>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                            {Object.entries(it.predicted_binding.per_cyp).map(([cyp, m]) => (
+                              <div key={cyp} style={{ padding: "6px 10px", background: "var(--surface-2)", borderRadius: 6, fontSize: 11.5 }}>
+                                <p style={{ color: "var(--purple)", fontFamily: "monospace", fontWeight: 700, marginBottom: 2 }}>{cyp}</p>
+                                <p style={{ color: "var(--text-2)" }}>
+                                  pKd <strong style={{ color: "var(--text-1)" }}>{m.pkd?.toFixed(2)}</strong>
+                                  {m.rank_within_cyp != null && <span style={{ color: "var(--text-3)" }}> · rank <strong style={{ color: "var(--text-1)" }}>{m.rank_within_cyp}/24</strong></span>}
+                                </p>
+                                {m.percentile_overall != null && (
+                                  <p style={{ color: "var(--text-3)", fontSize: 10.5 }}>
+                                    {m.percentile_overall.toFixed(0)}th percentile · {m.relative_strength?.replace("rel_", "").replace("_", " ")}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
 
