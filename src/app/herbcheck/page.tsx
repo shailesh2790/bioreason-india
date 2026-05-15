@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
+
+const StructureViewer = dynamic(() => import("@/components/StructureViewer"), { ssr: false });
 
 interface PgxFlag {
   variant?: string;
@@ -307,25 +310,7 @@ export default function HerbCheckPage() {
                       )}
 
                       {it.predicted_binding.per_cyp && Object.keys(it.predicted_binding.per_cyp).length > 0 && (
-                        <div style={{ marginTop: 12, padding: "10px 12px", background: "rgba(139,92,246,0.06)", borderLeft: "3px solid var(--purple)", borderRadius: 6 }}>
-                          <p style={{ fontSize: 11, color: "var(--purple)", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 }}>MAMMAL DTI · per-CYP rank</p>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
-                            {Object.entries(it.predicted_binding.per_cyp).map(([cyp, m]) => (
-                              <div key={cyp} style={{ padding: "6px 10px", background: "var(--surface-2)", borderRadius: 6, fontSize: 11.5 }}>
-                                <p style={{ color: "var(--purple)", fontFamily: "monospace", fontWeight: 700, marginBottom: 2 }}>{cyp}</p>
-                                <p style={{ color: "var(--text-2)" }}>
-                                  pKd <strong style={{ color: "var(--text-1)" }}>{m.pkd?.toFixed(2)}</strong>
-                                  {m.rank_within_cyp != null && <span style={{ color: "var(--text-3)" }}> · rank <strong style={{ color: "var(--text-1)" }}>{m.rank_within_cyp}/24</strong></span>}
-                                </p>
-                                {m.percentile_overall != null && (
-                                  <p style={{ color: "var(--text-3)", fontSize: 10.5 }}>
-                                    {m.percentile_overall.toFixed(0)}th percentile · {m.relative_strength?.replace("rel_", "").replace("_", " ")}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                        <PerCypPanel cyps={it.predicted_binding.per_cyp} />
                       )}
 
                       <p style={{ marginTop: 10, fontSize: 10.5, color: "var(--text-3)", fontStyle: "italic" }}>
@@ -355,6 +340,61 @@ export default function HerbCheckPage() {
         )}
       </div>
     </main>
+  );
+}
+
+type CypRecord = NonNullable<Interaction["predicted_binding"]["per_cyp"]>[string];
+
+function PerCypPanel({ cyps }: { cyps: Record<string, CypRecord> }) {
+  // Default to the top-ranked CYP
+  const entries = Object.entries(cyps);
+  const sorted = [...entries].sort((a, b) => (b[1].pkd ?? 0) - (a[1].pkd ?? 0));
+  const [activeCyp, setActiveCyp] = useState<string | null>(null);
+
+  return (
+    <div style={{ marginTop: 12, padding: "10px 12px", background: "rgba(139,92,246,0.06)", borderLeft: "3px solid var(--purple)", borderRadius: 6 }}>
+      <p style={{ fontSize: 11, color: "var(--purple)", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 }}>
+        MAMMAL DTI · per-CYP rank · click any tile for 3D structure
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+        {sorted.map(([cyp, m]) => {
+          const isActive = activeCyp === cyp;
+          return (
+            <button
+              key={cyp}
+              type="button"
+              onClick={() => setActiveCyp(isActive ? null : cyp)}
+              style={{
+                textAlign: "left",
+                padding: "6px 10px",
+                background: isActive ? "rgba(139,92,246,0.16)" : "var(--surface-2)",
+                border: isActive ? "1px solid var(--purple)" : "1px solid var(--border)",
+                borderRadius: 6, fontSize: 11.5, cursor: "pointer", color: "inherit",
+              }}
+            >
+              <p style={{ color: "var(--purple)", fontFamily: "monospace", fontWeight: 700, marginBottom: 2 }}>{cyp}</p>
+              <p style={{ color: "var(--text-2)" }}>
+                pKd <strong style={{ color: "var(--text-1)" }}>{m.pkd?.toFixed(2)}</strong>
+                {m.rank_within_cyp != null && <span style={{ color: "var(--text-3)" }}> · rank <strong style={{ color: "var(--text-1)" }}>{m.rank_within_cyp}/24</strong></span>}
+              </p>
+              {m.percentile_overall != null && (
+                <p style={{ color: "var(--text-3)", fontSize: 10.5 }}>
+                  {m.percentile_overall.toFixed(0)}th percentile · {m.relative_strength?.replace("rel_", "").replace("_", " ")}
+                </p>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {activeCyp && (
+        <div style={{ marginTop: 10 }}>
+          <StructureViewer gene={activeCyp} height={380} />
+          <p style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6, textAlign: "center" }}>
+            Active-site residues highlighted in amber. Heme cofactor (catalytic Fe) shown as red sticks. Bound ligands (if any) shown as green sticks.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 

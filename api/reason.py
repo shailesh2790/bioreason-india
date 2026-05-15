@@ -1600,6 +1600,76 @@ async def herb_check(req: HerbCheckRequest):
     )
 
 
+# ── /structure (V2-D — 3D protein structures from RCSB PDB) ─────────────────
+
+# Curated CYP → PDB ID + binding-pocket residues (catalytic site + key access channel)
+_PDB_INDEX: dict[str, dict] = {
+    "CYP1A2":  {"pdb_id": "2HI4", "pocket_residues": [226, 322, 226, 318, 121, 124, 257],
+                 "title": "Cytochrome P450 1A2 — bound to alpha-naphthoflavone"},
+    "CYP2B6":  {"pdb_id": "3IBD", "pocket_residues": [101, 103, 209, 298, 366, 477],
+                 "title": "Cytochrome P450 2B6 — apo form"},
+    "CYP2C8":  {"pdb_id": "1PQ2", "pocket_residues": [99, 100, 105, 205, 295, 367, 476],
+                 "title": "Cytochrome P450 2C8 — crystal structure"},
+    "CYP2C9":  {"pdb_id": "1OG2", "pocket_residues": [99, 100, 105, 286, 365, 476],
+                 "title": "Cytochrome P450 2C9 — bound to S-warfarin"},
+    "CYP2C19": {"pdb_id": "4GQS", "pocket_residues": [99, 100, 105, 295, 366, 476],
+                 "title": "Cytochrome P450 2C19 — bound to (R)-(+)-N-3-benzyl-phenobarbital"},
+    "CYP2D6":  {"pdb_id": "2F9Q", "pocket_residues": [100, 216, 244, 297, 374, 483],
+                 "title": "Cytochrome P450 2D6 — crystal structure"},
+    "CYP2E1":  {"pdb_id": "3E4E", "pocket_residues": [83, 86, 209, 298, 366, 478],
+                 "title": "Cytochrome P450 2E1 — bound to indazole"},
+    "CYP3A4":  {"pdb_id": "1TQN", "pocket_residues": [108, 119, 121, 211, 215, 304, 305, 370, 373, 482],
+                 "title": "Cytochrome P450 3A4 — apo form"},
+}
+
+_pdb_cache: dict[str, str] = {}
+
+
+@app.get("/structure/{gene}")
+async def get_structure(gene: str):
+    """Fetch the curated 3D crystal structure for a CYP enzyme from RCSB PDB.
+
+    Returns the raw PDB text + pocket-residue list for highlighting in 3Dmol.js.
+    Cached in-memory after first fetch.
+    """
+    key = gene.upper()
+    if key not in _PDB_INDEX:
+        raise HTTPException(status_code=404, detail=f"No curated PDB structure for '{gene}'. Available: {list(_PDB_INDEX)}")
+
+    meta = _PDB_INDEX[key]
+    pdb_id = meta["pdb_id"]
+
+    if pdb_id not in _pdb_cache:
+        try:
+            import requests
+            r = requests.get(f"https://files.rcsb.org/download/{pdb_id}.pdb", timeout=15)
+            r.raise_for_status()
+            _pdb_cache[pdb_id] = r.text
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"RCSB fetch failed for {pdb_id}: {e}")
+
+    return {
+        "gene": key,
+        "pdb_id": pdb_id,
+        "title": meta["title"],
+        "pocket_residues": meta["pocket_residues"],
+        "pdb_data": _pdb_cache[pdb_id],
+        "source": "RCSB PDB",
+        "source_url": f"https://www.rcsb.org/structure/{pdb_id}",
+    }
+
+
+@app.get("/structure")
+async def list_structures():
+    """List all genes with curated PDB structures available."""
+    return {
+        "available": [
+            {"gene": k, "pdb_id": v["pdb_id"], "title": v["title"]}
+            for k, v in _PDB_INDEX.items()
+        ]
+    }
+
+
 class ResolveRequest(BaseModel):
     term: str
     label: str = "Disease"  # Disease | Drug | Gene | Phytochemical | Pathway
