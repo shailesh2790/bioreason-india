@@ -20,7 +20,12 @@ import anthropic
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 
-from api.firebase_auth import verify_user
+from api.firebase_auth import (
+    verify_user,
+    log_event,
+    get_user_events,
+    get_user_summary,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 from neo4j import exceptions as neo4j_exc
@@ -914,6 +919,12 @@ async def repurpose(req: RepurposeRequest, user: dict = Depends(verify_user)):
                 + ". Try one of those as the input."
             )
 
+    log_event(user, "repurpose", {
+        "disease": disease,
+        "resolved": resolved.get("canonical"),
+        "candidate_count": len(candidates),
+        "top": candidates[0].drug if candidates else None,
+    })
     return RepurposeResponse(
         answer=answer_prose,
         paths=_build_candidate_paths(candidates, disease),
@@ -1329,6 +1340,13 @@ async def validate_phytopharma(req: DossierRequest, user: dict = Depends(verify_
     )
 
     from datetime import datetime, timezone
+    log_event(user, "validate_dossier", {
+        "compound": identity.compound_name,
+        "applicant_firm": req.applicant_firm,
+        "claimed_indication": req.claimed_indication,
+        "evidence_strength": cdsco_summary.overall_evidence_strength,
+        "ready_for_submission": cdsco_summary.ready_for_submission,
+    })
     return DossierResponse(
         compound=identity.compound_name,
         applicant_firm=req.applicant_firm,
@@ -1593,6 +1611,13 @@ async def herb_check(req: HerbCheckRequest, user: dict = Depends(verify_user)):
         "evidence_grades": {g: sum(1 for i in interactions if i.evidence_grade == g) for g in ("A", "B", "C", "D")},
     }
 
+    log_event(user, "herbcheck", {
+        "herbs": req.herbs,
+        "drugs": req.drugs,
+        "interaction_count": len(interactions),
+        "highest_severity": summary["highest_severity"],
+        "indian_specific_risk": summary["indian_specific_risk"],
+    })
     return HerbCheckResponse(
         interactions=interactions,
         unresolved_herbs=unresolved_herbs,
@@ -1726,6 +1751,25 @@ async def whoami(authorization: str = Header(default="")):
         return {"configured": True, "user": user}
     except HTTPException as e:
         return {"configured": True, "user": None, "error": e.detail}
+
+
+@app.get("/me/events")
+async def my_events(limit: int = 50, user: dict = Depends(verify_user)):
+    """The signed-in user's audit trail (most recent first)."""
+    limit = max(1, min(limit, 200))
+    return {"uid": user["uid"], "events": get_user_events(user["uid"], limit)}
+
+
+@app.get("/me/summary")
+async def my_summary(user: dict = Depends(verify_user)):
+    """Aggregate usage counts for the signed-in user."""
+    summary = get_user_summary(user["uid"])
+    return {
+        "uid": user["uid"],
+        "email": user.get("email", ""),
+        "name": user.get("name", ""),
+        **summary,
+    }
 
 
 @app.get("/health")

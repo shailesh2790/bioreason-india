@@ -61,6 +61,85 @@ def firestore_db():
     return _firestore_client
 
 
+def log_event(user: dict, event_type: str, payload: dict | None = None) -> None:
+    """Best-effort audit write. Never raises — audit logging must not break the API.
+
+    Writes:
+      users/{uid}              — upserted profile (email, name, last_seen, plan)
+      audit/{uid}/events/{id}  — one doc per protected action
+    """
+    try:
+        db = firestore_db()
+        if db is None or not user.get("uid"):
+            return
+        from firebase_admin import firestore as _fs
+        uid = user["uid"]
+
+        db.collection("users").document(uid).set(
+            {
+                "uid": uid,
+                "email": user.get("email", ""),
+                "name": user.get("name", ""),
+                "picture": user.get("picture", ""),
+                "provider": user.get("provider", ""),
+                "plan": "free",
+                "last_seen": _fs.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        db.collection("audit").document(uid).collection("events").add(
+            {
+                "type": event_type,
+                "payload": payload or {},
+                "email": user.get("email", ""),
+                "ts": _fs.SERVER_TIMESTAMP,
+            }
+        )
+    except Exception:
+        # Swallow — audit is non-critical
+        pass
+
+
+def get_user_events(uid: str, limit: int = 50) -> list[dict]:
+    """Return the most recent audit events for a user."""
+    db = firestore_db()
+    if db is None or not uid:
+        return []
+    try:
+        from firebase_admin import firestore as _fs
+        q = (
+            db.collection("audit").document(uid).collection("events")
+            .order_by("ts", direction=_fs.Query.DESCENDING)
+            .limit(limit)
+        )
+        out = []
+        for doc in q.stream():
+            d = doc.to_dict()
+            ts = d.get("ts")
+            out.append({
+                "id": doc.id,
+                "type": d.get("type", ""),
+                "payload": d.get("payload", {}),
+                "ts": ts.isoformat() if hasattr(ts, "isoformat") else None,
+            })
+        return out
+    except Exception:
+        return []
+
+
+def get_user_summary(uid: str) -> dict:
+    """Aggregate counts by event type for a user."""
+    events = get_user_events(uid, limit=500)
+    by_type: dict[str, int] = {}
+    for e in events:
+        by_type[e["type"]] = by_type.get(e["type"], 0) + 1
+    return {
+        "total_events": len(events),
+        "by_type": by_type,
+        "latest": events[0]["ts"] if events else None,
+    }
+
+
 async def verify_user(authorization: str = Header(default="")) -> dict:
     """FastAPI dependency: validate Bearer ID token, return user claims.
 
