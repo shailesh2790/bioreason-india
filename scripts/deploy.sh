@@ -37,17 +37,20 @@ npx --yes vercel alias set "${DEPLOY_URL#https://}" "$ALIAS_DOMAIN"
 step "Waiting for Railway FastAPI to expose new routes"
 until curl -sf -m 10 "https://$ALIAS_DOMAIN/api/stats" -o /dev/null; do sleep 8; done
 
-step "Smoke-testing /api/repurpose"
-HTTP_CODE=$(curl -s -m 30 -o /tmp/bioreason-smoke.json -w "%{http_code}" \
+step "Smoke-testing public /api/stats + auth gate on /api/repurpose"
+STATS_CODE=$(curl -s -m 20 -o /tmp/bioreason-smoke.json -w "%{http_code}" "https://$ALIAS_DOMAIN/api/stats")
+# Protected endpoint must reject anonymous calls with 401 (auth gate working)
+GATE_CODE=$(curl -s -m 20 -o /dev/null -w "%{http_code}" \
   -X POST -H "Content-Type: application/json" \
-  -d '{"disease":"tuberculosis","limit":3,"india_context":true}' \
+  -d '{"disease":"tuberculosis","limit":3}' \
   "https://$ALIAS_DOMAIN/api/repurpose")
-if [[ "$HTTP_CODE" = "200" ]]; then
-  CANDIDATES=$(grep -oE '"drug":"[^"]+"' /tmp/bioreason-smoke.json | head -3 | tr '\n' ' ')
-  printf "\n\033[1;32m[OK]\033[0m /api/repurpose 200 -> %s\n" "$CANDIDATES"
+if [[ "$STATS_CODE" = "200" && "$GATE_CODE" = "401" ]]; then
+  NODES=$(grep -oE '"node_count":[0-9]+' /tmp/bioreason-smoke.json | head -1)
+  printf "\n\033[1;32m[OK]\033[0m public /api/stats 200 (%s) · auth gate /api/repurpose 401 (anon rejected)\n" "$NODES"
+elif [[ "$STATS_CODE" = "200" ]]; then
+  printf "\n\033[1;33m[WARN]\033[0m /api/stats OK but /api/repurpose returned %s (expected 401 auth gate). Check verify_user wiring.\n" "$GATE_CODE"
 else
-  printf "\n\033[1;33m[WARN]\033[0m /api/repurpose returned %s (Railway may still be building). Retry in ~60s.\n" "$HTTP_CODE"
-  head -c 400 /tmp/bioreason-smoke.json; echo
+  printf "\n\033[1;33m[WARN]\033[0m /api/stats returned %s (Railway may still be building). Retry in ~60s.\n" "$STATS_CODE"
 fi
 
 step "Done. Live at https://$ALIAS_DOMAIN"
