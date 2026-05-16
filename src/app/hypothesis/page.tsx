@@ -3,6 +3,7 @@
 import { useState } from "react";
 import NetworkGraph, { GraphData } from "@/components/NetworkGraph";
 import { exportReportPdf } from "@/lib/exportPdf";
+import { useAuth } from "@/lib/auth";
 
 const EXAMPLES = [
   { a: "Curcumin",     b: "Alzheimer",        label: "Ayurveda → Neurodegeneration" },
@@ -37,6 +38,7 @@ function buildGraphFromPaths(paths: any[]): GraphData {
 }
 
 export default function HypothesisPage() {
+  const { fetchWithAuth } = useAuth();
   const [entityA, setEntityA] = useState("");
   const [entityB, setEntityB] = useState("");
   const [loading, setLoading] = useState(false);
@@ -60,7 +62,7 @@ For each path found, describe the full mechanistic chain.
 What is the biological plausibility of this connection? Rate confidence as HIGH/MEDIUM/LOW with reasoning.`;
 
     try {
-      const res = await fetch("/api/reason", {
+      const res = await fetchWithAuth("/api/reason", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, max_hops: 3, india_context: true }),

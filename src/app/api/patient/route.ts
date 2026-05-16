@@ -25,9 +25,10 @@ async function safeJson(res: Response): Promise<{ ok: boolean; data: any; status
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const auth = request.headers.get("authorization");
     const upstream = await fetch(`${FASTAPI_URL}/patient`, {
       method: "POST",
-      headers: PROXY_HEADERS,
+      headers: { ...PROXY_HEADERS, ...(auth ? { Authorization: auth } : {}) },
       body: JSON.stringify(body),
     });
     const { data, status } = await safeJson(upstream);

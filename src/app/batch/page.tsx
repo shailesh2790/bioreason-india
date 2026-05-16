@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import { exportReportPdf } from "@/lib/exportPdf";
+import { useAuth } from "@/lib/auth";
 
 type Mode = "compounds" | "diseases";
 type Status = "pending" | "running" | "done" | "error";
@@ -20,6 +21,7 @@ const SAMPLE_COMPOUNDS = "Curcumin\nQuercetin\nBerberine\nPiperine\nWithaferin A
 const SAMPLE_DISEASES = "tuberculosis\ndiabetes mellitus\nalzheimer\nmalaria\nleishmaniasis";
 
 export default function BatchPage() {
+  const { fetchWithAuth } = useAuth();
   const [mode, setMode] = useState<Mode>("compounds");
   const [input, setInput] = useState("");
   const [items, setItems] = useState<BatchItem[]>([]);
@@ -50,7 +52,7 @@ export default function BatchPage() {
       if (abortRef.current) break;
       setItems((prev) => prev.map((it) => it.id === i ? { ...it, status: "running" } : it));
       try {
-        const res = await fetch("/api/reason", {
+        const res = await fetchWithAuth("/api/reason", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ question: buildQuestion(names[i]), max_hops: 3, india_context: true }),

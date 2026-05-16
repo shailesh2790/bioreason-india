@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import PathGraph, { PathData } from "@/components/PathGraph";
+import { useAuth } from "@/lib/auth";
 
 const PGX_GENES = [
   { gene: "CYP2C19", note: "Clopidogrel, PPIs, SSRIs — *2 variant 20–25% in S.Asia" },
@@ -31,6 +32,7 @@ interface ReasonResponse {
 }
 
 export default function PharmacogenomicsPage() {
+  const { fetchWithAuth } = useAuth();
   const [gene, setGene] = useState("");
   const [drug, setDrug] = useState("");
   const [loading, setLoading] = useState(false);
@@ -63,7 +65,7 @@ Find: 1) Which genes does ${target} target, and which genes metabolise/transport
 Focus on actionable clinical pharmacogenomics.`;
 
     try {
-      const res = await fetch("/api/reason", {
+      const res = await fetchWithAuth("/api/reason", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, max_hops: 3, india_context: true }),

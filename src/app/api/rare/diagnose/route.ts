@@ -8,9 +8,10 @@ const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const auth = request.headers.get("authorization");
     const upstream = await fetch(`${FASTAPI_URL}/rare/diagnose`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(auth ? { Authorization: auth } : {}) },
       body: JSON.stringify(body),
     });
     const text = await upstream.text();

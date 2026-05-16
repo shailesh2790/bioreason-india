@@ -13,11 +13,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const auth = request.headers.get("authorization");
     const upstream = await fetch(`${FASTAPI_URL}/reason`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "bypass-tunnel-reminder": "true",
+        ...(auth ? { Authorization: auth } : {}),
       },
       body: JSON.stringify(body),
     });

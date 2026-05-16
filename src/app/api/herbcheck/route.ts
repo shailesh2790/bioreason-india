@@ -13,9 +13,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const auth = request.headers.get("authorization");
     const upstream = await fetch(`${FASTAPI_URL}/herbcheck`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(auth ? { Authorization: auth } : {}) },
       body: JSON.stringify(body),
     });
     const data = await upstream.json().catch(() => null);

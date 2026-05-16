@@ -3,6 +3,8 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 
+import { useAuth } from "@/lib/auth";
+
 const StructureViewer = dynamic(() => import("@/components/StructureViewer"), { ssr: false });
 
 interface PgxFlag {
@@ -129,6 +131,7 @@ function ChipInput({ label, value, setValue, examples, accent }: {
 }
 
 export default function HerbCheckPage() {
+  const { fetchWithAuth } = useAuth();
   const [herbs, setHerbs] = useState<string[]>([]);
   const [drugs, setDrugs] = useState<string[]>([]);
   const [cyp2c19, setCyp2c19] = useState("");
@@ -141,7 +144,7 @@ export default function HerbCheckPage() {
     if (!herbs.length || !drugs.length || loading) return;
     setLoading(true); setResult(null); setError(null);
     try {
-      const res = await fetch("/api/herbcheck", {
+      const res = await fetchWithAuth("/api/herbcheck", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

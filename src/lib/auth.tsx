@@ -29,6 +29,7 @@ export interface AuthState {
   signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<User>;
   signOut: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
+  fetchWithAuth: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -91,9 +92,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return auth.currentUser.getIdToken();
   }, []);
 
+  const fetchWithAuth = useCallback(async (input: RequestInfo, init: RequestInit = {}) => {
+    const { auth } = getFirebase();
+    const headers = new Headers(init.headers || {});
+    if (auth?.currentUser) {
+      try {
+        const token = await auth.currentUser.getIdToken();
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+      } catch { /* fall through — request will 401 and UI handles it */ }
+    }
+    return fetch(input, { ...init, headers });
+  }, []);
+
   const value = useMemo(
-    () => ({ user, loading, configured, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, getIdToken }),
-    [user, loading, configured, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, getIdToken]
+    () => ({ user, loading, configured, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, getIdToken, fetchWithAuth }),
+    [user, loading, configured, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, getIdToken, fetchWithAuth]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

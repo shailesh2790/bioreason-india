@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 const TRACKED_DRUGS = [
   "Clopidogrel", "Warfarin", "Primaquine", "Codeine", "Tramadol",
@@ -73,6 +74,7 @@ if (safety.overall_severity === "HIGH") {
 }`;
 
 export default function PgxApiPage() {
+  const { fetchWithAuth } = useAuth();
   const [drug, setDrug] = useState("Clopidogrel");
   const [variants, setVariants] = useState("rs4244285");
   const [state, setState] = useState("Bihar");
@@ -83,7 +85,7 @@ export default function PgxApiPage() {
   const test = async () => {
     setLoading(true); setError(null); setResult(null);
     try {
-      const res = await fetch("/api/pgx/check", {
+      const res = await fetchWithAuth("/api/pgx/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

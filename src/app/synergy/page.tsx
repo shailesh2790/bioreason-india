@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 interface QueryResult {
   drug: string;
@@ -16,6 +17,7 @@ const EXAMPLE_DRUGS = [
 ];
 
 export default function SynergyPage() {
+  const { fetchWithAuth } = useAuth();
   const [drug, setDrug] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -36,7 +38,7 @@ export default function SynergyPage() {
 Return up to 15 synergistic partners ranked by mechanistic evidence strength.`;
 
     try {
-      const res = await fetch("/api/reason", {
+      const res = await fetchWithAuth("/api/reason", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, max_hops: 3, india_context: true }),

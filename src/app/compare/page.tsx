@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import PathGraph, { PathData } from "@/components/PathGraph";
+import { useAuth } from "@/lib/auth";
 
 interface ReasonResponse {
   answer: string;
@@ -24,8 +25,11 @@ const COMPARE_MODES = [
 
 type ModeId = typeof COMPARE_MODES[number]["id"];
 
-async function fetchReason(question: string): Promise<ReasonResponse> {
-  const res = await fetch("/api/reason", {
+async function fetchReason(
+  question: string,
+  fetcher: (input: RequestInfo, init?: RequestInit) => Promise<Response>,
+): Promise<ReasonResponse> {
+  const res = await fetcher("/api/reason", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, max_hops: 3, india_context: true }),
@@ -34,6 +38,7 @@ async function fetchReason(question: string): Promise<ReasonResponse> {
 }
 
 export default function ComparePage() {
+  const { fetchWithAuth } = useAuth();
   const [mode, setMode] = useState<ModeId>("drug-drug");
   const [left, setLeft] = useState("");
   const [right, setRight] = useState("");
@@ -60,8 +65,8 @@ export default function ComparePage() {
 
     // Run both queries in parallel
     const [lData, rData] = await Promise.allSettled([
-      fetchReason(makeQ(left, right)),
-      fetchReason(makeQ(right, left)),
+      fetchReason(makeQ(left, right), fetchWithAuth),
+      fetchReason(makeQ(right, left), fetchWithAuth),
     ]);
 
     setLeftRes({

@@ -18,7 +18,9 @@ from typing import Any, Optional
 
 import anthropic
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+
+from api.firebase_auth import verify_user
 from fastapi.middleware.cors import CORSMiddleware
 from neo4j import GraphDatabase
 from neo4j import exceptions as neo4j_exc
@@ -639,7 +641,7 @@ def _format_repurpose_answer(disease: str, keyword: str, candidates: list[Repurp
 
 
 @app.post("/reason", response_model=ReasonResponse)
-async def reason(req: ReasonRequest):
+async def reason(req: ReasonRequest, user: dict = Depends(verify_user)):
     if not req.question or not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
@@ -745,7 +747,7 @@ async def reason(req: ReasonRequest):
 
 
 @app.post("/repurpose", response_model=RepurposeResponse)
-async def repurpose(req: RepurposeRequest):
+async def repurpose(req: RepurposeRequest, user: dict = Depends(verify_user)):
     disease = req.disease.strip()
     if not disease:
         raise HTTPException(status_code=400, detail="Disease cannot be empty.")
@@ -1102,7 +1104,7 @@ def _format_section_4(
 
 
 @app.post("/validate", response_model=DossierResponse)
-async def validate_phytopharma(req: DossierRequest):
+async def validate_phytopharma(req: DossierRequest, user: dict = Depends(verify_user)):
     """Generate a typed CDSCO Phytopharmaceutical Drug submission dossier."""
     name = (req.compound or "").strip()
     if not name:
@@ -1468,7 +1470,7 @@ def _score_severity(shared_cyps: list[str], pgx_variants: list[dict], patient: H
 
 
 @app.post("/herbcheck", response_model=HerbCheckResponse)
-async def herb_check(req: HerbCheckRequest):
+async def herb_check(req: HerbCheckRequest, user: dict = Depends(verify_user)):
     if not req.herbs or not req.drugs:
         raise HTTPException(status_code=400, detail="Both 'herbs' and 'drugs' arrays must be non-empty.")
 
@@ -1767,6 +1769,7 @@ async def vision_analyse(
     image: UploadFile = File(...),
     modality: str = Form(default=""),
     clinical_context: str = Form(default=""),
+    user: dict = Depends(verify_user),
 ):
     """
     Upload a biomedical image → Llama 3.2 Vision extracts clinical findings →

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 // ── India PGx variants (matches the 7-rule curated set in api/patient.py) ──
 const INDIA_PGX_VARIANTS = [
@@ -70,6 +71,7 @@ interface RiskResponse {
 }
 
 export default function TwinPage() {
+  const { fetchWithAuth } = useAuth();
   // ── form state ──
   const [age, setAge] = useState(52);
   const [sex, setSex] = useState<"M" | "F" | "Other">("M");
@@ -104,7 +106,7 @@ export default function TwinPage() {
     setAnalysis(null);
 
     try {
-      const create = await fetch("/api/patient", {
+      const create = await fetchWithAuth("/api/patient", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -121,7 +123,7 @@ export default function TwinPage() {
       }
       const ptid = created.patient_id;
 
-      const riskRes = await fetch(`/api/patient/${ptid}/risk`);
+      const riskRes = await fetchWithAuth(`/api/patient/${ptid}/risk`);
       const riskData = await riskRes.json();
       if (!riskRes.ok) {
         setError(riskData.error || "Risk dashboard failed");
@@ -141,7 +143,7 @@ export default function TwinPage() {
     setAnalysis(null);
 
     try {
-      const res = await fetch(`/api/patient/${risk.patient.id}/analyze`, {
+      const res = await fetchWithAuth(`/api/patient/${risk.patient.id}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, max_hops: 3 }),

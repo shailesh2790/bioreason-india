@@ -6,9 +6,14 @@ const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
 
 export async function POST(request: NextRequest, { params }: { params: { patientId: string } }) {
   const body = await request.json();
+  const auth = request.headers.get("authorization");
   const upstream = await fetch(`${FASTAPI_URL}/patient/${params.patientId}/analyze`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "bypass-tunnel-reminder": "true" },
+    headers: {
+      "Content-Type": "application/json",
+      "bypass-tunnel-reminder": "true",
+      ...(auth ? { Authorization: auth } : {}),
+    },
     body: JSON.stringify(body),
   });
   const text = await upstream.text();

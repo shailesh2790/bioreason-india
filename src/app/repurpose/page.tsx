@@ -3,6 +3,7 @@
 import { useState } from "react";
 import PathGraph, { PathData } from "@/components/PathGraph";
 import { exportReportPdf } from "@/lib/exportPdf";
+import { useAuth } from "@/lib/auth";
 
 const INDIA_DISEASES = [
   "Type 2 Diabetes",
@@ -35,6 +36,7 @@ interface ReasonResponse {
 }
 
 export default function RepurposePage() {
+  const { fetchWithAuth } = useAuth();
   const [disease, setDisease] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ReasonResponse | null>(null);
@@ -47,7 +49,7 @@ export default function RepurposePage() {
     setError(null);
 
     try {
-      const res = await fetch("/api/repurpose", {
+      const res = await fetchWithAuth("/api/repurpose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ disease, limit: 10, india_context: true }),

@@ -26,8 +26,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+
+from api.firebase_auth import verify_user
 
 # Lazy import of the driver from the main reason module to avoid duplication
 from api.reason import neo4j_driver, run_cypher, llm_complete  # noqa: E402
@@ -185,7 +187,7 @@ RETURN count(p) AS removed
 
 
 @router.post("", status_code=201)
-async def create_patient(req: PatientCreate) -> dict:
+async def create_patient(req: PatientCreate, user: dict = Depends(verify_user)) -> dict:
     pid = f"pt-{uuid.uuid4().hex[:10]}"
 
     with neo4j_driver().session() as s:
@@ -241,12 +243,12 @@ def _load_profile(patient_id: str) -> dict:
 
 
 @router.get("/{patient_id}")
-async def get_patient(patient_id: str) -> dict:
+async def get_patient(patient_id: str, user: dict = Depends(verify_user)) -> dict:
     return _load_profile(patient_id)
 
 
 @router.delete("/{patient_id}")
-async def delete_patient(patient_id: str) -> dict:
+async def delete_patient(patient_id: str, user: dict = Depends(verify_user)) -> dict:
     with neo4j_driver().session() as s:
         result = s.run(DELETE_PATIENT, {"pid": patient_id})
         removed = result.single()["removed"]
@@ -340,7 +342,7 @@ def compute_risk(profile: dict) -> dict:
 
 
 @router.get("/{patient_id}/risk")
-async def patient_risk(patient_id: str) -> dict:
+async def patient_risk(patient_id: str, user: dict = Depends(verify_user)) -> dict:
     profile = _load_profile(patient_id)
     risk = compute_risk(profile)
     log_event("patient.risk", {"patient_id": patient_id, "alert_count": len(risk["pgx_alerts"])})
@@ -394,7 +396,7 @@ def _format_patient_context(profile: dict, risk: dict) -> str:
 
 
 @router.post("/{patient_id}/analyze")
-async def analyze_patient(patient_id: str, req: AnalyzeRequest) -> dict:
+async def analyze_patient(patient_id: str, req: AnalyzeRequest, user: dict = Depends(verify_user)) -> dict:
     profile = _load_profile(patient_id)
     risk = compute_risk(profile)
     patient_ctx = _format_patient_context(profile, risk)

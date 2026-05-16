@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useAuth } from "@/lib/auth";
 
 const INDIA_STATES = [
   "Andhra Pradesh", "Bihar", "Delhi", "Gujarat", "Haryana", "Karnataka", "Kerala",
@@ -51,6 +52,7 @@ const SAMPLE_CASES = [
 ];
 
 export default function RarePage() {
+  const { fetchWithAuth } = useAuth();
   const [description, setDescription] = useState("");
   const [chips, setChips] = useState<Phenotype[]>([]);
   const [search, setSearch] = useState("");
@@ -102,7 +104,7 @@ export default function RarePage() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/rare/diagnose", {
+      const res = await fetchWithAuth("/api/rare/diagnose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import NetworkGraph, { GraphData } from "@/components/NetworkGraph";
 import PGxAlert from "@/components/PGxAlert";
+import { useAuth } from "@/lib/auth";
 
 type Modality = "retinal_fundus" | "blood_smear" | "histopathology" | "cytology" | "general";
 
@@ -37,6 +38,7 @@ interface VisionResult {
 }
 
 export default function VisionPage() {
+  const { fetchWithAuth } = useAuth();
   const [modality, setModality] = useState<Modality>("general");
   const [clinicalContext, setClinicalContext] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -75,7 +77,7 @@ export default function VisionPage() {
     form.append("clinical_context", clinicalContext);
 
     try {
-      const res = await fetch("/api/vision", { method: "POST", body: form });
+      const res = await fetchWithAuth("/api/vision", { method: "POST", body: form });
       const data = await res.json();
       if (data.error) setError(data.error);
       else setResult(data);

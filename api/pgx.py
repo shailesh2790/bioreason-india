@@ -18,8 +18,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+
+from api.firebase_auth import verify_user
 
 from api.patient import (  # noqa: E402
     PGX_RULES,
@@ -225,7 +227,7 @@ def _severity_label(score: int) -> str:
 
 
 @router.post("/check", response_model=PgxCheckResponse)
-async def pgx_check(req: PgxCheckRequest) -> PgxCheckResponse:
+async def pgx_check(req: PgxCheckRequest, user: dict = Depends(verify_user)) -> PgxCheckResponse:
     """Prescription-time pharmacogenomic safety check.
 
     Designed for EHR integration. Sub-200ms response. Either pass known
@@ -267,7 +269,7 @@ async def pgx_check(req: PgxCheckRequest) -> PgxCheckResponse:
 
 
 @router.post("/batch")
-async def pgx_batch(req: BatchCheckRequest) -> dict:
+async def pgx_batch(req: BatchCheckRequest, user: dict = Depends(verify_user)) -> dict:
     """Bulk check — useful for medication-reconciliation or pre-discharge review."""
     variants_set = {v.strip() for v in req.variants if v.strip()}
     results = []

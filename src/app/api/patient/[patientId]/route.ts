@@ -17,19 +17,21 @@ async function safeJson(res: Response): Promise<{ data: any; status: number }> {
   }
 }
 
-export async function GET(_: NextRequest, { params }: { params: { patientId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: { patientId: string } }) {
+  const auth = req.headers.get("authorization");
   const upstream = await fetch(`${FASTAPI_URL}/patient/${params.patientId}`, {
     cache: "no-store",
-    headers: HEADERS,
+    headers: { ...HEADERS, ...(auth ? { Authorization: auth } : {}) },
   });
   const { data, status } = await safeJson(upstream);
   return NextResponse.json(data, { status });
 }
 
-export async function DELETE(_: NextRequest, { params }: { params: { patientId: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: { patientId: string } }) {
+  const auth = req.headers.get("authorization");
   const upstream = await fetch(`${FASTAPI_URL}/patient/${params.patientId}`, {
     method: "DELETE",
-    headers: HEADERS,
+    headers: { ...HEADERS, ...(auth ? { Authorization: auth } : {}) },
   });
   const { data, status } = await safeJson(upstream);
   return NextResponse.json(data, { status });

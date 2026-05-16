@@ -7,10 +7,11 @@ const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
+    const auth = request.headers.get("authorization");
 
     const upstream = await fetch(`${FASTAPI_URL}/vision/analyse`, {
       method: "POST",
-      headers: { "bypass-tunnel-reminder": "true" },
+      headers: { "bypass-tunnel-reminder": "true", ...(auth ? { Authorization: auth } : {}) },
       body: formData,
     });
 

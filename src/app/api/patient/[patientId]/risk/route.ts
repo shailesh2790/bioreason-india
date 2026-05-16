@@ -4,10 +4,11 @@ export const dynamic = "force-dynamic";
 
 const FASTAPI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
 
-export async function GET(_: NextRequest, { params }: { params: { patientId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: { patientId: string } }) {
+  const auth = req.headers.get("authorization");
   const upstream = await fetch(`${FASTAPI_URL}/patient/${params.patientId}/risk`, {
     cache: "no-store",
-    headers: { "bypass-tunnel-reminder": "true" },
+    headers: { "bypass-tunnel-reminder": "true", ...(auth ? { Authorization: auth } : {}) },
   });
   const text = await upstream.text();
   try {

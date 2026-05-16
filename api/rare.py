@@ -25,8 +25,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+
+from api.firebase_auth import verify_user
 
 from api.reason import neo4j_driver, llm_complete  # noqa: E402
 from api.patient import log_event  # noqa: E402
@@ -110,7 +112,7 @@ def _search_phenotypes(keywords: list[str], limit: int = 6) -> list[dict]:
 
 
 @router.post("/match-phenotypes")
-async def match_phenotypes(req: PhenotypeMatchRequest) -> dict:
+async def match_phenotypes(req: PhenotypeMatchRequest, user: dict = Depends(verify_user)) -> dict:
     """Convert free-text symptoms into standardised HPO Phenotype nodes."""
     # Step 1: ask the LLM to extract clinical phenotype terms from the prose
     system = """You are a clinical geneticist's assistant. Extract a JSON list of 5-12 short
@@ -264,7 +266,7 @@ def _confidence_label(overlap: int, specificity: float, total_phens: int) -> str
 
 
 @router.post("/diagnose", response_model=DiagnoseResponse)
-async def diagnose(req: DiagnoseRequest) -> DiagnoseResponse:
+async def diagnose(req: DiagnoseRequest, user: dict = Depends(verify_user)) -> DiagnoseResponse:
     """Produce a ranked differential of likely rare genetic diagnoses."""
     # 1. Resolve phenotypes from any combination of HPO IDs, names, and free text
     phenotypes = list(req.phenotypes)

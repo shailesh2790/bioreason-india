@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { exportDossierPdf, DossierResponse } from "@/lib/exportDossierPdf";
+import { useAuth } from "@/lib/auth";
 
 const IMPPAT_COMPOUNDS = [
   "Curcumin", "Withaferin A", "Andrographolide", "Boswellic acid", "Berberine",
@@ -72,6 +73,7 @@ function KV({ k, v }: { k: string; v: string | null | undefined }) {
 }
 
 export default function ValidatePage() {
+  const { fetchWithAuth } = useAuth();
   const [compound, setCompound] = useState("");
   const [applicantFirm, setApplicantFirm] = useState("");
   const [claimedIndication, setClaimedIndication] = useState("");
@@ -86,7 +88,7 @@ export default function ValidatePage() {
     setResult(null);
     setError(null);
     try {
-      const res = await fetch("/api/validate", {
+      const res = await fetchWithAuth("/api/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

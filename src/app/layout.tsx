@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import Link from "next/link";
 import ThemeToggle from "../components/ThemeToggle";
 import NavAuth from "../components/NavAuth";
+import ProtectedGate from "../components/ProtectedGate";
 import { AuthProvider } from "../lib/auth";
 import "./globals.css";
 
@@ -110,7 +111,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </nav>
 
-        {children}
+        <ProtectedGate>{children}</ProtectedGate>
 
         </AuthProvider>
       </body>
