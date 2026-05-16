@@ -6,6 +6,7 @@ import RequireAuth from "./RequireAuth";
 // Routes that require a signed-in user. Everything else is public.
 const PROTECTED_PREFIXES = [
   "/herbcheck",
+  "/pedonco",
   "/validate",
   "/repurpose",
   "/rare",

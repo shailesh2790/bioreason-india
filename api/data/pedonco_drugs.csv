@@ -1,0 +1,12 @@
+drug_name,short_name,drug_class,pediatric_protocol_use,standard_pediatric_dose,dose_unit,route,key_pgx_genes,key_toxicities,max_dose_cap,cpic_guideline
+6-Mercaptopurine,6-MP,Antimetabolite (purine analog),ALL maintenance — backbone for 2-3 years,75,mg/m2/day,PO,NUDT15;TPMT,Myelosuppression;Hepatotoxicity;Severe infections,—,CPIC 2018 (updated 2019)
+Methotrexate,MTX (maintenance),Antimetabolite (DHFR inhibitor),ALL maintenance — weekly,20,mg/m2/week,PO,MTHFR;SLC19A1;SLCO1B1,Hepatotoxicity;Mucositis;Myelosuppression,—,CPIC 2018 (SLCO1B1)
+Methotrexate HD,HD-MTX,Antimetabolite (high-dose),ALL consolidation — q2-4 weeks,5000,mg/m2/cycle,IV,MTHFR;SLC19A1;ABCB1,Renal toxicity;Mucositis;Severe myelosuppression,—,CPIC + leucovorin rescue mandatory
+Vincristine,VCR,Vinca alkaloid (mitotic inhibitor),ALL induction + maintenance — weekly,1.5,mg/m2/week,IV push,CYP3A5;CEP72,Peripheral neuropathy;Constipation;Jaw pain,2 mg/dose,CPIC 2022 (Vincristine + CYP3A5)
+Imatinib,—,BCR-ABL tyrosine kinase inhibitor,Ph+ ALL frontline,340,mg/m2/day,PO,BCR-ABL1 mutations,Edema;Myelosuppression;Hepatotoxicity,600 mg/day,COG AALL1631 protocol
+Dasatinib,—,2nd-gen BCR-ABL TKI,Imatinib-resistant Ph+ ALL,60,mg/m2/day,PO,BCR-ABL T315I resistance flag,Pleural effusion;Myelosuppression;QT prolongation,140 mg/day,FDA pediatric label
+L-Asparaginase,L-Asp,Enzyme (depletes asparagine),ALL induction,6000,IU/m2,IM,—,Hypersensitivity;Pancreatitis;Thrombosis;Hyperglycemia,—,Hypersensitivity drives substitution to PEG-Asp or Erwinia
+Cyclophosphamide,CYP,Alkylating agent,High-risk ALL + AML induction,1000,mg/m2/cycle,IV,CYP2B6,Hemorrhagic cystitis;Myelosuppression;Cardiotoxicity (HD),—,Mesna + hydration mandatory
+Cytarabine,Ara-C,Antimetabolite (pyrimidine analog),AML induction + ALL CNS prophylaxis,100,mg/m2/q12h,IV,CDA;NT5C2,Myelosuppression;Cerebellar toxicity (HD);Conjunctivitis,—,UK ALL R3 protocol
+Daunorubicin,DNR,Anthracycline,ALL induction + AML,25,mg/m2/dose,IV,CBR3;NQO1;TOP2B,Cardiotoxicity (cumulative);Myelosuppression;Mucositis,Cumulative 300 mg/m2 lifetime,Late-effects surveillance per COG LTFU
+Doxorubicin,DXR,Anthracycline,ALL high-risk + Burkitt,25,mg/m2/week,IV,CBR3;NQO1;ABCB1,Cardiotoxicity (cumulative);Myelosuppression;Alopecia,Cumulative 450 mg/m2 lifetime,Dexrazoxane cardioprotection considered

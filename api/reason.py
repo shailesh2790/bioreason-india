@@ -2134,6 +2134,435 @@ async def admin_load_imppat(x_admin_token: str = Header(default="")):
     )
 
 
+# ── PediOncoPGx (v3 — Pediatric Blood Cancer dosing) ────────────────────────
+#
+# Encodes CPIC dosing guidelines for the six Indian-frequency-relevant variants
+# from the v3 strategy doc. Outputs are decision-support — they do not replace
+# clinician judgment. CPIC guideline IDs are tagged on every recommendation.
+
+class GenotypeInput(BaseModel):
+    gene: str  # NUDT15, TPMT, MTHFR, CYP3A5, SLC19A1, TP53
+    diplotype: str  # e.g. "*1/*3", "CC/CT", "GG", "wild_type", "homozygous_variant"
+
+
+class PedoncoDoseRequest(BaseModel):
+    drug: str  # 6-Mercaptopurine | Methotrexate | Vincristine | Imatinib | ...
+    weight_kg: Optional[float] = None
+    bsa_m2: Optional[float] = None  # body surface area; if absent we estimate
+    age_years: Optional[float] = None
+    genotypes: list[GenotypeInput] = []
+    indication: str = "Pediatric ALL"  # for context only
+    applicant_clinician: Optional[str] = None  # name on the report
+
+
+class DoseRecommendation(BaseModel):
+    drug: str
+    standard_dose_text: str
+    recommended_dose_mg: Optional[float] = None
+    recommended_dose_text: str
+    percent_of_standard: int  # 100 = full dose
+    metabolizer_phenotype: str
+    risk_tier: str  # GREEN | YELLOW | RED
+    actions: list[str]
+    cpic_guideline: str
+    alternative_drugs: list[str] = []
+    indian_frequency_context: str
+    monitoring_plan: list[str]
+    triggering_variants: list[dict]
+    confidence: float
+
+
+class PedoncoDoseResponse(BaseModel):
+    drug: str
+    indication: str
+    bsa_used_m2: Optional[float]
+    standard_dose_mg: Optional[float]
+    recommendation: DoseRecommendation
+    disclaimer: str
+    generated_at_iso: str
+
+
+# ── CPIC rule encoding ──────────────────────────────────────────────────────
+
+def _estimate_bsa(weight_kg: Optional[float], height_cm: Optional[float] = None) -> Optional[float]:
+    """Mosteller BSA formula. If only weight given, approximate BSA from weight (pediatric)."""
+    if weight_kg is None:
+        return None
+    if height_cm:
+        return round(((weight_kg * height_cm) / 3600) ** 0.5, 3)
+    # Approximate pediatric BSA from weight alone (Costeff): BSA ≈ (4W+7) / (W+90)
+    return round((4 * weight_kg + 7) / (weight_kg + 90), 3)
+
+
+def _classify_thiopurine_metabolizer(genotypes: list[GenotypeInput]) -> tuple[str, list[dict]]:
+    """Return (phenotype, triggering_variants) for NUDT15 + TPMT combined.
+
+    Phenotypes per CPIC: Normal | Intermediate | Possible Intermediate | Poor.
+    """
+    triggering: list[dict] = []
+    nudt15_count = 0
+    tpmt_count = 0
+
+    for g in genotypes:
+        gene = g.gene.upper()
+        diplotype = g.diplotype.strip()
+        if gene == "NUDT15":
+            # Count *2/*3/*4 variant alleles (anything other than *1)
+            variant_alleles = sum(1 for a in diplotype.split("/") if a.strip() not in ("*1", "wt", "wild_type", "1"))
+            if variant_alleles:
+                nudt15_count += variant_alleles
+                triggering.append({"gene": "NUDT15", "diplotype": diplotype, "variant_alleles": variant_alleles})
+        elif gene == "TPMT":
+            variant_alleles = sum(1 for a in diplotype.split("/") if a.strip() not in ("*1", "wt", "wild_type", "1"))
+            if variant_alleles:
+                tpmt_count += variant_alleles
+                triggering.append({"gene": "TPMT", "diplotype": diplotype, "variant_alleles": variant_alleles})
+
+    total = nudt15_count + tpmt_count
+    if total == 0:
+        return "Normal metabolizer", []
+    if total >= 2:
+        return "Poor metabolizer", triggering
+    return "Intermediate metabolizer", triggering
+
+
+def _rule_6mp(req: PedoncoDoseRequest, bsa: Optional[float], standard_mg: Optional[float]) -> DoseRecommendation:
+    """CPIC 2018 (updated 2019) — thiopurines vs NUDT15 + TPMT."""
+    phenotype, triggering = _classify_thiopurine_metabolizer(req.genotypes)
+
+    af_text = "NUDT15*3 carrier frequency: 8–10% in South Asians (vs 0.4% Europeans). TPMT variants: ~3% South Asians."
+
+    if phenotype == "Normal metabolizer":
+        return DoseRecommendation(
+            drug="6-Mercaptopurine",
+            standard_dose_text="75 mg/m²/day PO (ALL maintenance)",
+            recommended_dose_mg=round(standard_mg, 1) if standard_mg else None,
+            recommended_dose_text=f"Standard dose: {round(standard_mg, 1) if standard_mg else 'standard'} mg/day (75 mg/m²/day)",
+            percent_of_standard=100,
+            metabolizer_phenotype=phenotype,
+            risk_tier="GREEN",
+            actions=["Start at full standard dose.", "Titrate to maintain ANC 0.75-1.5 × 10⁹/L."],
+            cpic_guideline="CPIC 2018 (updated 2019) — Thiopurines + NUDT15/TPMT",
+            alternative_drugs=[],
+            indian_frequency_context=af_text,
+            monitoring_plan=["Weekly CBC with differential x 4 weeks", "Then biweekly until stable", "ALT/AST monthly"],
+            triggering_variants=triggering,
+            confidence=0.92,
+        )
+    elif phenotype == "Intermediate metabolizer":
+        pct = 50
+        rec_mg = round(standard_mg * pct / 100, 1) if standard_mg else None
+        return DoseRecommendation(
+            drug="6-Mercaptopurine",
+            standard_dose_text="75 mg/m²/day PO (standard ALL maintenance)",
+            recommended_dose_mg=rec_mg,
+            recommended_dose_text=f"START at {pct}% of standard dose ≈ {rec_mg} mg/day (range 30-80%); titrate to ANC target.",
+            percent_of_standard=pct,
+            metabolizer_phenotype=phenotype,
+            risk_tier="YELLOW",
+            actions=[
+                "Start at 30-50% of standard dose (CPIC range 30-80%).",
+                "Titrate based on ANC tolerance.",
+                "Heterozygous patients reach therapeutic dose in 2-4 weeks on average.",
+            ],
+            cpic_guideline="CPIC 2018 (updated 2019) — Thiopurines + NUDT15/TPMT",
+            alternative_drugs=[],
+            indian_frequency_context=af_text,
+            monitoring_plan=[
+                "CBC twice weekly x 2 weeks, then weekly x 4 weeks",
+                "Watch for severe neutropenia or thrombocytopenia",
+                "ALT/AST every 2 weeks",
+            ],
+            triggering_variants=triggering,
+            confidence=0.88,
+        )
+    else:  # Poor metabolizer
+        pct = 10
+        rec_mg = round(standard_mg * pct / 100, 1) if standard_mg else None
+        return DoseRecommendation(
+            drug="6-Mercaptopurine",
+            standard_dose_text="75 mg/m²/day PO (standard ALL maintenance)",
+            recommended_dose_mg=rec_mg,
+            recommended_dose_text=f"AVOID standard dosing. Use ≤10 mg/m²/day OR alternate-day schedule ≈ {rec_mg} mg/day; consider non-thiopurine substitution.",
+            percent_of_standard=pct,
+            metabolizer_phenotype=phenotype,
+            risk_tier="RED",
+            actions=[
+                "Start at ≤10 mg/m²/day OR thrice-weekly dosing.",
+                "Strongly consider substituting with non-thiopurine therapy.",
+                "Discuss with hematology pharmacy lead before first dose.",
+                "Counsel family — 6-MP can cause life-threatening myelosuppression in poor metabolizers.",
+            ],
+            cpic_guideline="CPIC 2018 (updated 2019) — Thiopurines + NUDT15/TPMT",
+            alternative_drugs=["Methotrexate (monitor MTHFR)", "Cyclophosphamide-based maintenance"],
+            indian_frequency_context=af_text,
+            monitoring_plan=[
+                "CBC daily x 1 week post initial dose",
+                "Then twice weekly x 4 weeks",
+                "Hospital admission for febrile neutropenia threshold lowered",
+            ],
+            triggering_variants=triggering,
+            confidence=0.90,
+        )
+
+
+def _rule_methotrexate(req: PedoncoDoseRequest, bsa: Optional[float], standard_mg: Optional[float], is_high_dose: bool) -> DoseRecommendation:
+    """MTHFR C677T + A1298C + SLC19A1 G80A modify methotrexate toxicity/efficacy."""
+    mthfr_677_variant = False
+    mthfr_677_homozygous = False
+    mthfr_1298_variant = False
+    slc_variant = False
+    triggering: list[dict] = []
+
+    for g in req.genotypes:
+        gene = g.gene.upper()
+        dip = g.diplotype.upper().strip()
+        if gene == "MTHFR" and ("677" in dip or "C677T" in dip):
+            if "TT" in dip or "T/T" in dip:
+                mthfr_677_homozygous = True
+                triggering.append({"gene": "MTHFR", "variant": "C677T homozygous", "diplotype": dip})
+            elif "CT" in dip or "C/T" in dip:
+                mthfr_677_variant = True
+                triggering.append({"gene": "MTHFR", "variant": "C677T heterozygous", "diplotype": dip})
+        if gene == "MTHFR" and ("1298" in dip or "A1298C" in dip):
+            if "CC" in dip or "C/C" in dip:
+                mthfr_1298_variant = True
+                triggering.append({"gene": "MTHFR", "variant": "A1298C homozygous", "diplotype": dip})
+        if gene == "SLC19A1" and ("GG" in dip or "AA" in dip and "80" in dip):
+            slc_variant = True
+            triggering.append({"gene": "SLC19A1", "variant": "G80A", "diplotype": dip})
+
+    af_text = "MTHFR C677T: 18% Indians homozygous (vs 10% Europeans). A1298C: ~10% Indians homozygous."
+    drug_label = "Methotrexate (high-dose)" if is_high_dose else "Methotrexate"
+
+    if mthfr_677_homozygous:
+        pct = 75 if is_high_dose else 100
+        rec_mg = round(standard_mg * pct / 100, 1) if standard_mg else None
+        return DoseRecommendation(
+            drug=drug_label,
+            standard_dose_text="20 mg/m²/week PO (maintenance) or 5 g/m² IV (HD)",
+            recommended_dose_mg=rec_mg,
+            recommended_dose_text=(f"Reduce HD-MTX to 75% ≈ {rec_mg} mg with intensified leucovorin rescue."
+                                   if is_high_dose else
+                                   f"Maintain standard dose {rec_mg} mg/m²/week with enhanced toxicity monitoring."),
+            percent_of_standard=pct,
+            metabolizer_phenotype="MTHFR 677TT homozygous — reduced enzyme activity",
+            risk_tier="YELLOW",
+            actions=[
+                "Intensify leucovorin rescue if HD-MTX (start within 24h)." if is_high_dose else "Standard leucovorin not routine in maintenance — monitor LFTs.",
+                "Counsel family on mucositis and hepatotoxicity signs.",
+                "Adequate hydration mandatory for HD-MTX." if is_high_dose else "Folate supplementation 1 mg/day during therapy.",
+            ],
+            cpic_guideline="No CPIC for MTHFR-MTX (DPWG guidance + literature). PharmGKB Level 2A.",
+            alternative_drugs=[],
+            indian_frequency_context=af_text,
+            monitoring_plan=[
+                "MTX serum level at 24/48/72h post HD-MTX" if is_high_dose else "ALT/AST + CBC monthly",
+                "Mucositis grade assessment q48h" if is_high_dose else "Mucositis check weekly",
+                "Creatinine + urine pH monitoring" if is_high_dose else "Folate level if symptomatic",
+            ],
+            triggering_variants=triggering,
+            confidence=0.78,
+        )
+    elif mthfr_677_variant or mthfr_1298_variant or slc_variant:
+        return DoseRecommendation(
+            drug=drug_label,
+            standard_dose_text="20 mg/m²/week PO (maintenance) or 5 g/m² IV (HD)",
+            recommended_dose_mg=round(standard_mg, 1) if standard_mg else None,
+            recommended_dose_text=f"Standard dose {round(standard_mg, 1) if standard_mg else 'standard'} mg with enhanced toxicity monitoring.",
+            percent_of_standard=100,
+            metabolizer_phenotype="MTHFR heterozygous or SLC19A1 variant — mild risk",
+            risk_tier="YELLOW",
+            actions=[
+                "Standard dosing — but anticipate higher rates of mucositis and hepatotoxicity.",
+                "Folate 1 mg/day supplementation recommended.",
+            ],
+            cpic_guideline="DPWG + PharmGKB Level 2B",
+            alternative_drugs=[],
+            indian_frequency_context=af_text,
+            monitoring_plan=["CBC weekly", "ALT/AST monthly", "Mucositis assessment weekly"],
+            triggering_variants=triggering,
+            confidence=0.70,
+        )
+    else:
+        return DoseRecommendation(
+            drug=drug_label,
+            standard_dose_text="20 mg/m²/week PO (maintenance) or 5 g/m² IV (HD)",
+            recommended_dose_mg=round(standard_mg, 1) if standard_mg else None,
+            recommended_dose_text=f"Standard dose {round(standard_mg, 1) if standard_mg else 'standard'} mg.",
+            percent_of_standard=100,
+            metabolizer_phenotype="Normal MTHFR/SLC19A1",
+            risk_tier="GREEN",
+            actions=["Standard methotrexate dosing.", "Folate 1 mg/day supplementation per ALL protocol."],
+            cpic_guideline="Standard ALL protocol (BFM/COG/UKALL)",
+            alternative_drugs=[],
+            indian_frequency_context=af_text,
+            monitoring_plan=["CBC weekly", "ALT/AST monthly"],
+            triggering_variants=[],
+            confidence=0.85,
+        )
+
+
+def _rule_vincristine(req: PedoncoDoseRequest, bsa: Optional[float], standard_mg: Optional[float]) -> DoseRecommendation:
+    """CPIC 2022 — CYP3A5*3 + vincristine neurotoxicity."""
+    cyp3a5_non_expressor = False
+    triggering: list[dict] = []
+
+    for g in req.genotypes:
+        if g.gene.upper() == "CYP3A5":
+            dip = g.diplotype.strip()
+            # *3/*3 = non-expressor
+            if dip.count("*3") == 2 or dip in ("*3/*3", "3/3"):
+                cyp3a5_non_expressor = True
+                triggering.append({"gene": "CYP3A5", "variant": "*3/*3 non-expressor", "diplotype": dip})
+
+    af_text = "CYP3A5*3 non-expressor: 66% in South Asians (vs 94% Europeans). Lower CYP3A5 expression = MORE intact vincristine = higher neurotoxicity in some studies."
+
+    if cyp3a5_non_expressor:
+        return DoseRecommendation(
+            drug="Vincristine",
+            standard_dose_text="1.5 mg/m²/week IV push (capped at 2 mg/dose)",
+            recommended_dose_mg=min(round(standard_mg, 1) if standard_mg else 2.0, 2.0),
+            recommended_dose_text=f"Maintain cap at 2 mg/dose. Standard {min(round(standard_mg, 1) if standard_mg else 2.0, 2.0)} mg/dose.",
+            percent_of_standard=100,
+            metabolizer_phenotype="CYP3A5 non-expressor (*3/*3)",
+            risk_tier="YELLOW",
+            actions=[
+                "Maintain 2 mg total dose cap per CPIC.",
+                "Active neuropathy surveillance — assess at every visit.",
+                "Hold dose if grade ≥2 neuropathy; consider grade 1 dose reduction.",
+                "Counsel family on constipation, jaw pain, foot drop signs.",
+            ],
+            cpic_guideline="CPIC 2022 — Vincristine + CYP3A5",
+            alternative_drugs=[],
+            indian_frequency_context=af_text,
+            monitoring_plan=[
+                "Neurological exam at each weekly visit",
+                "Tendon reflexes, finger-to-nose, gait observation",
+                "Bowel function tracking — stool softener prophylaxis",
+            ],
+            triggering_variants=triggering,
+            confidence=0.75,
+        )
+    else:
+        return DoseRecommendation(
+            drug="Vincristine",
+            standard_dose_text="1.5 mg/m²/week IV push (capped at 2 mg/dose)",
+            recommended_dose_mg=min(round(standard_mg, 1) if standard_mg else 2.0, 2.0),
+            recommended_dose_text=f"Standard {min(round(standard_mg, 1) if standard_mg else 2.0, 2.0)} mg/dose with 2 mg cap.",
+            percent_of_standard=100,
+            metabolizer_phenotype="CYP3A5 expressor or unknown",
+            risk_tier="GREEN",
+            actions=["Standard vincristine dosing with 2 mg cap.", "Standard neuropathy surveillance."],
+            cpic_guideline="CPIC 2022 — Vincristine + CYP3A5",
+            alternative_drugs=[],
+            indian_frequency_context=af_text,
+            monitoring_plan=["Weekly neuro exam", "Bowel function check"],
+            triggering_variants=[],
+            confidence=0.82,
+        )
+
+
+def _rule_generic(drug_name: str, standard_mg: Optional[float], standard_text: str) -> DoseRecommendation:
+    """For drugs without specific Indian-relevant PGx triggers, return standard dosing with caveat."""
+    return DoseRecommendation(
+        drug=drug_name,
+        standard_dose_text=standard_text,
+        recommended_dose_mg=round(standard_mg, 1) if standard_mg else None,
+        recommended_dose_text=f"Standard pediatric dosing {round(standard_mg, 1) if standard_mg else ''} mg.",
+        percent_of_standard=100,
+        metabolizer_phenotype="No India-specific PGx trigger curated for this drug",
+        risk_tier="GREEN",
+        actions=["Use standard pediatric protocol dosing.", "Apply Indian Pediatric Oncology Group adaptations as appropriate."],
+        cpic_guideline="—",
+        alternative_drugs=[],
+        indian_frequency_context="No India-prevalent dosing-modifier variants curated for this agent yet (PediOncoPGx v1 covers 6-MP, MTX, Vincristine).",
+        monitoring_plan=["Per institutional ALL/AML protocol"],
+        triggering_variants=[],
+        confidence=0.60,
+    )
+
+
+_PEDONCO_DRUG_INDEX = {
+    "6-Mercaptopurine": {"dose_mgm2": 75.0, "unit_text": "75 mg/m²/day PO", "rule": "6mp", "is_hd": False},
+    "6-MP": {"dose_mgm2": 75.0, "unit_text": "75 mg/m²/day PO", "rule": "6mp", "is_hd": False},
+    "Methotrexate": {"dose_mgm2": 20.0, "unit_text": "20 mg/m²/week PO (maintenance)", "rule": "mtx", "is_hd": False},
+    "Methotrexate HD": {"dose_mgm2": 5000.0, "unit_text": "5000 mg/m²/cycle IV (HD)", "rule": "mtx", "is_hd": True},
+    "Vincristine": {"dose_mgm2": 1.5, "unit_text": "1.5 mg/m²/week IV (2 mg cap)", "rule": "vcr", "is_hd": False},
+    "Imatinib": {"dose_mgm2": 340.0, "unit_text": "340 mg/m²/day PO (Ph+ ALL)", "rule": "generic"},
+    "Dasatinib": {"dose_mgm2": 60.0, "unit_text": "60 mg/m²/day PO", "rule": "generic"},
+    "L-Asparaginase": {"dose_mgm2": 6000.0, "unit_text": "6000 IU/m² IM", "rule": "generic"},
+    "Cyclophosphamide": {"dose_mgm2": 1000.0, "unit_text": "1000 mg/m²/cycle IV", "rule": "generic"},
+    "Cytarabine": {"dose_mgm2": 100.0, "unit_text": "100 mg/m² IV q12h", "rule": "generic"},
+    "Daunorubicin": {"dose_mgm2": 25.0, "unit_text": "25 mg/m²/dose IV", "rule": "generic"},
+    "Doxorubicin": {"dose_mgm2": 25.0, "unit_text": "25 mg/m²/week IV", "rule": "generic"},
+}
+
+
+@app.post("/pedonco/dose", response_model=PedoncoDoseResponse)
+async def pedonco_dose(req: PedoncoDoseRequest, user: dict = Depends(verify_user)):
+    """PediOncoPGx — CPIC-grounded dose recommendation for pediatric blood cancer agents.
+
+    Decision support only. Does not replace clinician judgment.
+    """
+    drug = req.drug.strip()
+    meta = _PEDONCO_DRUG_INDEX.get(drug)
+    if not meta:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Drug not in PediOncoPGx v1 index. Supported: {list(_PEDONCO_DRUG_INDEX.keys())}",
+        )
+
+    bsa = req.bsa_m2 or _estimate_bsa(req.weight_kg)
+    standard_mg = (meta["dose_mgm2"] * bsa) if (bsa and meta.get("dose_mgm2")) else None
+
+    rule = meta["rule"]
+    if rule == "6mp":
+        rec = _rule_6mp(req, bsa, standard_mg)
+    elif rule == "mtx":
+        rec = _rule_methotrexate(req, bsa, standard_mg, meta.get("is_hd", False))
+    elif rule == "vcr":
+        rec = _rule_vincristine(req, bsa, standard_mg)
+    else:
+        rec = _rule_generic(drug, standard_mg, meta["unit_text"])
+
+    log_event(user, "pedonco_dose", {
+        "drug": drug,
+        "indication": req.indication,
+        "risk_tier": rec.risk_tier,
+        "metabolizer": rec.metabolizer_phenotype,
+        "percent_of_standard": rec.percent_of_standard,
+        "genotype_count": len(req.genotypes),
+    })
+
+    from datetime import datetime, timezone
+    return PedoncoDoseResponse(
+        drug=drug,
+        indication=req.indication,
+        bsa_used_m2=bsa,
+        standard_dose_mg=round(standard_mg, 1) if standard_mg else None,
+        recommendation=rec,
+        disclaimer=(
+            "Decision support only. Does not replace clinician judgment. Always confirm dose with institutional "
+            "pediatric oncology protocol and consult clinical pharmacy before first administration. "
+            "PediOncoPGx encodes CPIC published guidelines (NUDT15/TPMT 2018-19, CYP3A5/Vincristine 2022) and "
+            "PharmGKB Level 2A evidence (MTHFR/SLC19A1)."
+        ),
+        generated_at_iso=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@app.get("/pedonco/index")
+async def pedonco_index():
+    """Public — list of supported drugs + variants for the UI selector."""
+    return {
+        "drugs": list(_PEDONCO_DRUG_INDEX.keys()),
+        "genes_with_dosing_impact": ["NUDT15", "TPMT", "MTHFR", "CYP3A5", "SLC19A1"],
+        "guideline_version": "CPIC 2018-2022 + PharmGKB curated",
+        "module_version": "PediOncoPGx v1 — Pediatric ALL focus",
+    }
+
+
 # ── /admin/load_mammal_predictions (V2-B) ───────────────────────────────────
 
 class LoadMammalResponse(BaseModel):

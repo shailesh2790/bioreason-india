@@ -1,0 +1,9 @@
+variant_id,gene,star_allele,rsid,nucleotide_change,protein_change,af_south_asian,af_european,af_east_asian,clinical_phenotype,affected_drugs,source
+NUDT15_3,NUDT15,*3,rs116855232,c.415C>T,p.Arg139Cys,0.09,0.004,0.10,Loss-of-function — increased thiopurine toxicity,6-Mercaptopurine;Azathioprine;Thioguanine,CPIC 2018 + IndiGen 2020
+TPMT_3C,TPMT,*3C,rs1142345,c.719A>G,p.Tyr240Cys,0.025,0.04,0.02,Reduced enzyme activity — thiopurine toxicity,6-Mercaptopurine;Azathioprine;Thioguanine,CPIC 2018
+TPMT_3A,TPMT,*3A,rs1800460+rs1142345,linked,p.Ala154Thr;p.Tyr240Cys,0.005,0.05,0.001,Reduced activity (most common in Europeans),6-Mercaptopurine;Azathioprine,CPIC 2018
+MTHFR_C677T,MTHFR,677T,rs1801133,c.665C>T,p.Ala222Val,0.18,0.34,0.40,Reduced enzyme activity — methotrexate toxicity risk,Methotrexate,IndiGen + PharmGKB
+MTHFR_A1298C,MTHFR,1298C,rs1801131,c.1286A>C,p.Glu429Ala,0.32,0.31,0.20,Mild reduction in MTHFR activity,Methotrexate,IndiGen + PharmGKB
+CYP3A5_3,CYP3A5,*3,rs776746,g.99672916A>G,intronic (splice),0.66,0.94,0.71,Non-expressor — vincristine neurotoxicity risk in expressors paradox,Vincristine;Tacrolimus,CPIC 2015 + Indian cohort studies
+SLC19A1_G80A,SLC19A1,G80A,rs1051266,c.80A>G,p.His27Arg,0.50,0.55,0.40,Altered methotrexate cellular uptake,Methotrexate,PharmGKB
+TP53_R248W,TP53,—,rs121912651,c.742C>T,p.Arg248Trp,0.001,0.001,0.001,Somatic mutation — treatment-resistant ALL biomarker,—,COSMIC + ICR Cancer Mutation
