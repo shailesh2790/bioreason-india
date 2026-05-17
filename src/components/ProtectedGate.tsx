@@ -9,6 +9,7 @@ const PROTECTED_PREFIXES = [
   "/pedonco",
   "/validate",
   "/repurpose",
+  "/oncorepurpose",
   "/rare",
   "/twin",
   "/vision",

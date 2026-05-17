@@ -2563,6 +2563,504 @@ async def pedonco_index():
     }
 
 
+# ── OncoRepurpose (FM + KG + Data → Cancer-focused Drug Repurposing) ────────
+#
+# Combines: KG topology ensemble + MAMMAL DTI re-rank + cancer-pathway boost
+# + driver-mutation target match + per-patient PGx toxicity filter + grounded
+# Llama synthesis. The fm doc's architecture, shippable today.
+
+# Cancer-pathway substring patterns recognized in PrimeKG pathway names
+_CANCER_PATHWAY_PATTERNS = [
+    ("PI3K/AKT/mTOR",    ["pi3k", "akt", "mtor", "phosphatidylinositol 3-kinase"]),
+    ("p53 / DNA damage", ["p53", "dna damage", "tp53"]),
+    ("NF-kB",            ["nf-kb", "nfkb", "nuclear factor kappa"]),
+    ("JAK-STAT",         ["jak", "stat3", "stat5", "interleukin signaling"]),
+    ("NOTCH",            ["notch"]),
+    ("MAPK / RAS-RAF",   ["mapk", "ras", "raf", "mek", "erk"]),
+    ("BCR-ABL / tyrosine kinase", ["bcr", "abl", "tyrosine kinase"]),
+    ("Apoptosis",        ["apoptos", "bcl-2", "bax"]),
+    ("Cell cycle",       ["cell cycle", "cyclin", "rb1"]),
+    ("DNA repair",       ["dna repair", "homologous recomb", "brca"]),
+]
+
+# Common oncogene driver mutations → genes to bias toward
+_DRIVER_MUTATION_TARGETS = {
+    "BCR-ABL": ["ABL1", "BCR"],
+    "BCR-ABL1": ["ABL1", "BCR"],
+    "EGFR":    ["EGFR"],
+    "EGFR T790M": ["EGFR"],
+    "EGFR L858R": ["EGFR"],
+    "KRAS":    ["KRAS"],
+    "KRAS G12C": ["KRAS"],
+    "BRAF":    ["BRAF"],
+    "BRAF V600E": ["BRAF"],
+    "ALK":     ["ALK"],
+    "ROS1":    ["ROS1"],
+    "HER2":    ["ERBB2"],
+    "ERBB2":   ["ERBB2"],
+    "PIK3CA":  ["PIK3CA"],
+    "TP53":    ["TP53"],
+    "MYC":     ["MYC"],
+    "NPM1":    ["NPM1"],
+    "FLT3":    ["FLT3"],
+    "FLT3 ITD": ["FLT3"],
+    "IDH1":    ["IDH1"],
+    "IDH2":    ["IDH2"],
+    "NOTCH1":  ["NOTCH1"],
+    "PAX5":    ["PAX5"],
+    "IKZF1":   ["IKZF1"],
+}
+
+
+class PgxGenotype(BaseModel):
+    gene: str
+    diplotype: str
+
+
+class OncoRepurposeRequest(BaseModel):
+    cancer_indication: str
+    driver_mutation: Optional[str] = None
+    patient_pgx: list[PgxGenotype] = []
+    include_phytochemicals: bool = True
+    include_trials: bool = True
+    limit: int = 10
+    india_context: bool = True
+    enable_synthesis: bool = True
+
+
+class CancerEvidenceLayer(BaseModel):
+    kg_path: bool = False
+    ppi_proximity: bool = False
+    mammal_dti: Optional[dict] = None       # {pkd, rank_within_cyp, percentile, ...}
+    cancer_pathway_hits: list[str] = []
+    driver_match: list[str] = []
+    indian_trial: Optional[dict] = None
+    phytochemical_alternative: list[str] = []
+
+
+class PgxToxicityVerdict(BaseModel):
+    risk_tier: str   # GREEN | YELLOW | RED | UNKNOWN
+    flag: Optional[str] = None
+    triggering_gene: Optional[str] = None
+    triggering_diplotype: Optional[str] = None
+
+
+class OncoCandidate(BaseModel):
+    drug: str
+    score: int
+    confidence: str
+    targets: list[str]
+    via_genes: list[str] = []
+    evidence_layers: CancerEvidenceLayer
+    pgx_verdict: PgxToxicityVerdict
+    mechanism: str
+    rationale_synthesis: Optional[str] = None
+
+
+class OncoRepurposeResponse(BaseModel):
+    cancer_indication: str
+    resolved_disease: Optional[dict] = None
+    driver_mutation_resolved: Optional[list[str]] = None
+    candidates: list[OncoCandidate]
+    suggestions: list[dict] = []
+    cypher_steps: list[dict]
+    summary: dict
+    generated_at_iso: str
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _cancer_pathway_hits(pathway_names: list[str]) -> list[str]:
+    """Return human-readable pathway labels that match cancer patterns."""
+    hits: set[str] = set()
+    for label, patterns in _CANCER_PATHWAY_PATTERNS:
+        for pw in pathway_names:
+            pw_lo = pw.lower()
+            if any(p in pw_lo for p in patterns):
+                hits.add(label)
+                break
+    return sorted(hits)
+
+
+def _pgx_toxicity_for_drug(drug: str, pgx: list[PgxGenotype]) -> PgxToxicityVerdict:
+    """Reuse the PediOncoPGx rule engine for cancer drugs the patient might receive.
+
+    Returns RED/YELLOW/GREEN/UNKNOWN. RED = strong contraindication; flag the drug.
+    """
+    if not pgx:
+        return PgxToxicityVerdict(risk_tier="UNKNOWN")
+
+    drug_lo = drug.lower()
+
+    # 6-MP / thiopurines + NUDT15/TPMT
+    if any(t in drug_lo for t in ["mercaptopurine", "azathioprine", "thioguanine", "6-mp"]):
+        # Reuse the thiopurine classifier
+        fake = PedoncoDoseRequest(drug="6-Mercaptopurine", genotypes=[
+            GenotypeInput(gene=g.gene, diplotype=g.diplotype) for g in pgx
+        ])
+        phenotype, triggering = _classify_thiopurine_metabolizer(fake.genotypes)
+        if phenotype == "Poor metabolizer":
+            tg = triggering[0] if triggering else {}
+            return PgxToxicityVerdict(
+                risk_tier="RED",
+                flag="Severe / fatal myelosuppression risk — avoid standard dose; consider non-thiopurine substitution.",
+                triggering_gene=tg.get("gene"),
+                triggering_diplotype=tg.get("diplotype"),
+            )
+        if phenotype == "Intermediate metabolizer":
+            tg = triggering[0] if triggering else {}
+            return PgxToxicityVerdict(
+                risk_tier="YELLOW",
+                flag="Reduce starting dose 30-50% (CPIC 2018-19); monitor CBC twice weekly.",
+                triggering_gene=tg.get("gene"),
+                triggering_diplotype=tg.get("diplotype"),
+            )
+        return PgxToxicityVerdict(risk_tier="GREEN")
+
+    # Methotrexate + MTHFR
+    if "methotrexate" in drug_lo or drug_lo in ("mtx",):
+        for g in pgx:
+            if g.gene.upper() == "MTHFR" and ("677tt" in g.diplotype.lower() or "tt" in g.diplotype.lower()):
+                return PgxToxicityVerdict(
+                    risk_tier="YELLOW",
+                    flag="MTHFR 677TT — enhanced toxicity monitoring; consider leucovorin rescue if HD.",
+                    triggering_gene="MTHFR", triggering_diplotype=g.diplotype,
+                )
+        return PgxToxicityVerdict(risk_tier="GREEN")
+
+    # Vincristine + CYP3A5
+    if "vincristine" in drug_lo:
+        for g in pgx:
+            if g.gene.upper() == "CYP3A5" and g.diplotype.count("*3") == 2:
+                return PgxToxicityVerdict(
+                    risk_tier="YELLOW",
+                    flag="CYP3A5 *3/*3 non-expressor — heightened neurotoxicity risk; maintain 2 mg cap.",
+                    triggering_gene="CYP3A5", triggering_diplotype=g.diplotype,
+                )
+        return PgxToxicityVerdict(risk_tier="GREEN")
+
+    # Clopidogrel + CYP2C19 (general cancer patients on antiplatelet)
+    if "clopidogrel" in drug_lo:
+        for g in pgx:
+            if g.gene.upper() == "CYP2C19" and ("*2" in g.diplotype or "poor" in g.diplotype.lower()):
+                return PgxToxicityVerdict(
+                    risk_tier="YELLOW",
+                    flag="CYP2C19 poor metabolizer — clopidogrel less effective; consider ticagrelor.",
+                    triggering_gene="CYP2C19", triggering_diplotype=g.diplotype,
+                )
+        return PgxToxicityVerdict(risk_tier="GREEN")
+
+    return PgxToxicityVerdict(risk_tier="UNKNOWN")
+
+
+def _confidence_for_score(score: int) -> str:
+    if score >= 12: return "HIGH"
+    if score >= 6: return "MEDIUM"
+    return "LOW"
+
+
+@app.post("/oncorepurpose", response_model=OncoRepurposeResponse)
+async def oncorepurpose(req: OncoRepurposeRequest, user: dict = Depends(verify_user)):
+    """Cancer-focused drug repurposing combining KG topology + MAMMAL DTI +
+    cancer-pathway enrichment + driver mutation target match + per-patient
+    PGx toxicity filter + (optionally) grounded Llama synthesis.
+    """
+    indication = req.cancer_indication.strip()
+    if not indication:
+        raise HTTPException(status_code=400, detail="cancer_indication cannot be empty")
+
+    limit = max(3, min(req.limit, 25))
+
+    # Resolve cancer indication to canonical graph keyword
+    from api.entity_resolver import resolve_disease
+    with neo4j_driver().session() as _rs:
+        resolved = resolve_disease(indication, _rs)
+    keyword = resolved.get("canonical") or _keyword(indication)
+
+    # Resolve driver mutation to gene list
+    driver_targets: list[str] = []
+    if req.driver_mutation:
+        dm_upper = req.driver_mutation.strip().upper()
+        for k, genes in _DRIVER_MUTATION_TARGETS.items():
+            if k.upper() in dm_upper or dm_upper in k.upper():
+                driver_targets = genes
+                break
+        if not driver_targets:
+            # Bare gene name fallback
+            for tok in dm_upper.split():
+                if 2 < len(tok) < 8 and tok.isalnum():
+                    driver_targets.append(tok)
+
+    # Layer 1 — KG topology ensemble (direct + PPI + trials + phyto + MAMMAL)
+    direct_cypher = """
+    MATCH (cand:Drug)-[:TARGETS]->(g:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
+    WHERE toLower(dis.name) CONTAINS toLower($keyword)
+      AND NOT EXISTS {
+        MATCH (cand)-[:INDICATED_FOR]->(approved:Disease)
+        WHERE toLower(approved.name) CONTAINS toLower($keyword)
+      }
+    OPTIONAL MATCH (g)-[:PARENT_OF|RELATED_TO*1..2]-(pw:Pathway)
+    RETURN cand.name AS drug,
+           collect(DISTINCT g.name)[0..8] AS genes,
+           collect(DISTINCT pw.name)[0..10] AS pathways,
+           count(DISTINCT g) AS gene_count
+    ORDER BY gene_count DESC, drug
+    LIMIT $limit
+    """
+    ppi_cypher = """
+    MATCH (cand:Drug)-[:TARGETS]->(g1:Gene)-[:PROTEIN_PROTEIN_INTERACTION]-(g2:Gene)-[:ASSOCIATED_WITH]->(dis:Disease)
+    WHERE toLower(dis.name) CONTAINS toLower($keyword)
+      AND NOT EXISTS {
+        MATCH (cand)-[:INDICATED_FOR]->(approved:Disease)
+        WHERE toLower(approved.name) CONTAINS toLower($keyword)
+      }
+    RETURN cand.name AS drug,
+           collect(DISTINCT g1.name)[0..8] AS genes,
+           collect(DISTINCT g2.name)[0..6] AS via_genes,
+           count(DISTINCT g2) AS proximity_count
+    ORDER BY proximity_count DESC, drug
+    LIMIT $limit
+    """
+    trial_cypher = """
+    MATCH (cand:Drug)-[:HAS_INDIAN_TRIAL]->(t:ClinicalTrial)-[:INVESTIGATES_DISEASE]->(dis:Disease)
+    WHERE toLower(dis.name) CONTAINS toLower($keyword)
+      AND t.status IN ["RECRUITING","ACTIVE_NOT_RECRUITING","COMPLETED"]
+    RETURN cand.name AS drug,
+           collect(DISTINCT {nct_id: t.nct_id, title: t.title, status: t.status, phase: t.phase})[0..2] AS trials
+    LIMIT 30
+    """
+    phyto_cypher = """
+    MATCH (p:Phytochemical)-[:TARGETS|HAS_TRADITIONAL_USE]->(node)
+    OPTIONAL MATCH (node)-[:ASSOCIATED_WITH]->(dis:Disease)
+    WITH p, node, dis WHERE dis IS NULL OR toLower(dis.name) CONTAINS toLower($keyword)
+    RETURN p.name AS phyto, collect(DISTINCT labels(node)[0])[0..3] AS via, count(*) AS hits
+    ORDER BY hits DESC LIMIT 10
+    """ if req.include_phytochemicals else None
+
+    # MAMMAL DTI re-rank — only candidates with strong predicted binding
+    mammal_cypher = """
+    MATCH (cand)-[mb:PREDICTED_BINDING]->(g:Gene)
+    WHERE g.name STARTS WITH 'CYP' OR g.name IN $driver_targets
+    RETURN cand.name AS drug,
+           collect(DISTINCT {gene: g.name, pkd: mb.pkd, rank: mb.rank_within_cyp, percentile: mb.percentile_overall})[0..5] AS mammal
+    LIMIT 100
+    """
+
+    cypher_steps = [
+        {"step": "KG: direct drug-gene-disease overlap (excluding already indicated)", "cypher": direct_cypher.strip()},
+        {"step": "KG: PPI proximity from drug targets to disease genes", "cypher": ppi_cypher.strip()},
+        {"step": "KG: Indian clinical trial overlay", "cypher": trial_cypher.strip()},
+    ]
+    if phyto_cypher:
+        cypher_steps.append({"step": "KG: Indian phytochemical alternatives", "cypher": phyto_cypher.strip()})
+    cypher_steps.append({"step": "FM: MAMMAL DTI predicted-binding re-rank", "cypher": mammal_cypher.strip()})
+
+    try:
+        params = {"keyword": keyword, "limit": limit, "driver_targets": driver_targets}
+        with neo4j_driver().session() as sess:
+            direct = list(sess.run(direct_cypher, **params))
+            ppi = list(sess.run(ppi_cypher, **params))
+            trials = list(sess.run(trial_cypher, keyword=keyword))
+            phytos = list(sess.run(phyto_cypher, keyword=keyword)) if phyto_cypher else []
+            mammal = list(sess.run(mammal_cypher, driver_targets=driver_targets or ["__none__"]))
+    except neo4j_exc.Neo4jError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Build candidate map
+    by_drug: dict[str, dict] = {}
+
+    for row in direct:
+        d = row.get("drug")
+        if not d: continue
+        entry = by_drug.setdefault(d, {
+            "score": 0, "targets": [], "via_genes": [], "pathways": [],
+            "trials": [], "mammal": [], "phyto_alts": [],
+        })
+        entry["targets"].extend(row.get("genes", []))
+        entry["pathways"].extend(row.get("pathways", []))
+        entry["score"] += 4 + int(row.get("gene_count", 0))
+        entry.setdefault("layers_hit", set()).add("kg_direct")
+
+    for row in ppi:
+        d = row.get("drug")
+        if not d: continue
+        entry = by_drug.setdefault(d, {
+            "score": 0, "targets": [], "via_genes": [], "pathways": [],
+            "trials": [], "mammal": [], "phyto_alts": [],
+        })
+        entry["targets"].extend(row.get("genes", []))
+        entry["via_genes"].extend(row.get("via_genes", []))
+        entry["score"] += 2 + min(int(row.get("proximity_count", 0)), 6)
+        entry.setdefault("layers_hit", set()).add("ppi")
+
+    for row in trials:
+        d = row.get("drug")
+        if d in by_drug:
+            by_drug[d]["trials"] = row.get("trials", [])
+            if row.get("trials"):
+                by_drug[d]["score"] += 3
+
+    # Top phytochemicals (used as alternatives)
+    phyto_alt_names = [r.get("phyto") for r in phytos if r.get("phyto")][:5]
+
+    for row in mammal:
+        d = row.get("drug")
+        if d in by_drug:
+            preds = row.get("mammal", [])
+            by_drug[d]["mammal"] = preds
+            # Bonus if any predicted binding is rank ≤3 or percentile ≥75
+            strong = any(
+                (p.get("rank") and p["rank"] <= 3) or (p.get("percentile") or 0) >= 75
+                for p in preds
+            )
+            if strong:
+                by_drug[d]["score"] += 3
+                by_drug[d].setdefault("layers_hit", set()).add("mammal_strong")
+
+    # Cancer-pathway boost
+    for d, e in by_drug.items():
+        hits = _cancer_pathway_hits(e.get("pathways", []))
+        e["cancer_pathway_hits"] = hits
+        e["score"] += 2 * len(hits)
+
+    # Driver-mutation target match bonus
+    if driver_targets:
+        driver_set = {t.upper() for t in driver_targets}
+        for d, e in by_drug.items():
+            matched = [t for t in e["targets"] if str(t).upper() in driver_set]
+            if matched:
+                e["driver_match"] = list(set(matched))
+                e["score"] += 5 * len(set(matched))
+            else:
+                e["driver_match"] = []
+    else:
+        for e in by_drug.values():
+            e["driver_match"] = []
+
+    # PGx toxicity filter — annotate each candidate
+    for d, e in by_drug.items():
+        e["pgx_verdict"] = _pgx_toxicity_for_drug(d, req.patient_pgx)
+
+    # Rank
+    sorted_candidates = sorted(by_drug.items(), key=lambda kv: (-kv[1]["score"], kv[0].lower()))[:limit]
+
+    # Build response objects
+    out_candidates: list[OncoCandidate] = []
+    for drug, e in sorted_candidates:
+        layers_hit = e.get("layers_hit", set())
+        mammal_best = None
+        if e.get("mammal"):
+            mb = max(e["mammal"], key=lambda x: x.get("pkd", 0) or 0)
+            mammal_best = mb
+
+        mech_parts = []
+        if "kg_direct" in layers_hit and e["targets"]:
+            mech_parts.append(f"Direct target overlap at {', '.join(list(set(e['targets']))[:3])}.")
+        if "ppi" in layers_hit and e["via_genes"]:
+            mech_parts.append(f"PPI proximity via {', '.join(list(set(e['via_genes']))[:3])}.")
+        if e.get("cancer_pathway_hits"):
+            mech_parts.append(f"Cancer pathway enrichment: {', '.join(e['cancer_pathway_hits'][:3])}.")
+        if e.get("driver_match"):
+            mech_parts.append(f"Driver target hit: {', '.join(e['driver_match'])}.")
+        if mammal_best:
+            mech_parts.append(f"MAMMAL DTI predicts binding at {mammal_best['gene']} (pKd {mammal_best.get('pkd',0):.2f}, rank {mammal_best.get('rank','—')}/24).")
+        if e.get("trials"):
+            mech_parts.append(f"Indian clinical trial: {e['trials'][0].get('nct_id','—')} ({e['trials'][0].get('status','—')}).")
+        mechanism = " ".join(mech_parts) or "Surfaced via topology ensemble only."
+
+        out_candidates.append(OncoCandidate(
+            drug=drug,
+            score=int(e["score"]),
+            confidence=_confidence_for_score(int(e["score"])),
+            targets=list({t for t in e["targets"] if t})[:8],
+            via_genes=list({v for v in e["via_genes"] if v})[:6],
+            evidence_layers=CancerEvidenceLayer(
+                kg_path="kg_direct" in layers_hit,
+                ppi_proximity="ppi" in layers_hit,
+                mammal_dti=mammal_best,
+                cancer_pathway_hits=e.get("cancer_pathway_hits", []),
+                driver_match=e.get("driver_match", []),
+                indian_trial=e["trials"][0] if e.get("trials") else None,
+                phytochemical_alternative=phyto_alt_names if e == sorted_candidates[0][1] else [],
+            ),
+            pgx_verdict=e["pgx_verdict"],
+            mechanism=mechanism,
+        ))
+
+    # Grounded synthesis — Llama prose limited to result entities only
+    if req.enable_synthesis and out_candidates:
+        try:
+            synth_payload = {
+                "indication": indication,
+                "resolved_keyword": keyword,
+                "driver_targets": driver_targets,
+                "candidates": [
+                    {
+                        "drug": c.drug,
+                        "targets": c.targets,
+                        "pathways": c.evidence_layers.cancer_pathway_hits,
+                        "driver_match": c.evidence_layers.driver_match,
+                        "mammal_pkd": c.evidence_layers.mammal_dti.get("pkd") if c.evidence_layers.mammal_dti else None,
+                        "pgx_risk": c.pgx_verdict.risk_tier,
+                    } for c in out_candidates[:5]
+                ],
+            }
+            grounding = (
+                "GROUNDING CONTRACT: You will be given a JSON of repurposing candidates for a cancer indication. "
+                "Write a 1-sentence biological rationale for each candidate. Only name genes/pathways present in the JSON. "
+                "Do NOT invent new mechanisms, drugs, or genes. If a candidate has PGx risk RED, prepend a safety warning. "
+                "Output JSON: {\"per_drug\": {\"<drug>\": \"<sentence>\"}}."
+            )
+            raw = llm_complete(
+                system=grounding,
+                user=json.dumps(synth_payload),
+                max_tokens=1500,
+            )
+            try:
+                synth = json.loads(_strip_markdown(raw))
+                per = synth.get("per_drug", {})
+                for c in out_candidates:
+                    if c.drug in per:
+                        c.rationale_synthesis = per[c.drug]
+            except Exception:
+                # Synthesis failed — leave rationales empty (mechanism prose still present)
+                pass
+        except Exception:
+            pass
+
+    # Summary
+    summary = {
+        "candidate_count": len(out_candidates),
+        "highest_confidence": out_candidates[0].confidence if out_candidates else "—",
+        "with_indian_trial": sum(1 for c in out_candidates if c.evidence_layers.indian_trial),
+        "with_mammal_evidence": sum(1 for c in out_candidates if c.evidence_layers.mammal_dti),
+        "with_driver_match": sum(1 for c in out_candidates if c.evidence_layers.driver_match),
+        "pgx_red_flags": sum(1 for c in out_candidates if c.pgx_verdict.risk_tier == "RED"),
+        "pgx_yellow_flags": sum(1 for c in out_candidates if c.pgx_verdict.risk_tier == "YELLOW"),
+    }
+
+    log_event(user, "oncorepurpose", {
+        "cancer_indication": indication,
+        "driver_mutation": req.driver_mutation,
+        "candidate_count": len(out_candidates),
+        "top": out_candidates[0].drug if out_candidates else None,
+        "pgx_genotype_count": len(req.patient_pgx),
+        "with_pgx_red": summary["pgx_red_flags"],
+    })
+
+    from datetime import datetime, timezone
+    return OncoRepurposeResponse(
+        cancer_indication=indication,
+        resolved_disease=resolved,
+        driver_mutation_resolved=driver_targets or None,
+        candidates=out_candidates,
+        suggestions=resolved.get("suggestions", []),
+        cypher_steps=cypher_steps,
+        summary=summary,
+        generated_at_iso=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 # ── /admin/load_mammal_predictions (V2-B) ───────────────────────────────────
 
 class LoadMammalResponse(BaseModel):
