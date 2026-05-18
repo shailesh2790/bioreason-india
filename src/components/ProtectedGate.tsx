@@ -10,6 +10,7 @@ const PROTECTED_PREFIXES = [
   "/validate",
   "/repurpose",
   "/oncorepurpose",
+  "/blastprofiler",
   "/rare",
   "/twin",
   "/vision",

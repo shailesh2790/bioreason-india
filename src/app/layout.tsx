@@ -30,6 +30,7 @@ const NAV_LINKS = [
   { href: "/validate",         label: "Ayurveda",     color: "hover:text-orange-400" },
   { href: "/herbcheck",        label: "HerbCheck",    color: "hover:text-red-400",    hot: true },
   { href: "/pedonco",          label: "PediOncoPGx",  color: "hover:text-red-400",    hot: true },
+  { href: "/blastprofiler",    label: "BlastProfiler",color: "hover:text-blue-400",   hot: true },
   { href: "/pharmacogenomics", label: "PGx",          color: "hover:text-purple-400" },
   { href: "/pgx-api",          label: "PGx API",      color: "hover:text-purple-400",  hot: true },
   { href: "/synergy",          label: "Synergy",      color: "hover:text-cyan-400" },

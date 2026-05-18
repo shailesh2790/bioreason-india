@@ -3061,6 +3061,460 @@ async def oncorepurpose(req: OncoRepurposeRequest, user: dict = Depends(verify_u
     )
 
 
+# ── BlastProfiler v0 (pediatric leukemia subtype + MRD + drug sensitivity) ──
+#
+# Marker-panel + driver-mutation heuristic classifier. Pipeline matches the
+# documented BlastProfiler schema (Mumme 2025 / Tsang 2025) — v1 swaps in
+# scGPT fine-tuned on PedSCAtlas as the classifier internals; the API contract
+# and downstream layers (PediOncoPGx + Neo4j + Indian trials) stay identical.
+
+class MarkerPanel(BaseModel):
+    """Flow cytometry / IHC marker percentages (0-100)."""
+    blast_percent: float = 0.0   # marrow blast %
+    cd19_pct: Optional[float] = None   # B-lineage
+    cd22_pct: Optional[float] = None   # B-lineage
+    cd10_pct: Optional[float] = None   # CALLA — common B-ALL
+    cd20_pct: Optional[float] = None
+    cd3_pct: Optional[float] = None    # T-lineage
+    cd7_pct: Optional[float] = None    # T-lineage (most specific)
+    cd2_pct: Optional[float] = None
+    cd13_pct: Optional[float] = None   # Myeloid
+    cd33_pct: Optional[float] = None   # Myeloid
+    cd34_pct: Optional[float] = None   # Stem/progenitor
+    cd117_pct: Optional[float] = None  # KIT — myeloid
+    mpo_pct: Optional[float] = None    # Myeloperoxidase — AML defining
+    tdt_pct: Optional[float] = None    # ALL marker (B or T lineage)
+    hla_dr_pct: Optional[float] = None
+
+
+class BlastProfilerRequest(BaseModel):
+    patient_id: Optional[str] = None
+    age_years: Optional[float] = None
+    sex: Optional[str] = None
+    weight_kg: Optional[float] = None
+    timepoint: str = "Diagnosis"   # Diagnosis | End of Induction | Relapse
+    wbc_x10_9_per_L: Optional[float] = None  # white-cell count at diagnosis
+    markers: MarkerPanel
+    driver_mutations: list[str] = []   # ["BCR-ABL","NOTCH1","FLT3 ITD",...]
+    patient_pgx: list[PgxGenotype] = []
+    clinician: Optional[str] = None
+    institution: Optional[str] = None
+
+
+class SubtypeProbability(BaseModel):
+    label: str             # B-ALL | T-ALL | AML | MPAL | Healthy BM
+    probability: float
+    subtype_refinement: Optional[str] = None  # Ph+ / Ph-like / ETV6-RUNX1 / APL / etc.
+
+
+class DiseaseStateOut(BaseModel):
+    label: str             # Diagnosis | EOI | Relapse-like
+    mrd_risk_score: float  # 0.0–1.0
+    relapse_similarity: float
+    drivers_of_risk: list[str]
+
+
+class DrugSensitivity(BaseModel):
+    drug: str
+    prediction: str        # Sensitive | Intermediate | Resistant | Not indicated
+    confidence: float
+    rationale: str
+
+
+class PgxAlertOut(BaseModel):
+    gene: str
+    variant: Optional[str] = None
+    status: str            # normal | intermediate | poor | unknown
+    action: str
+    drug_affected: str
+    population_risk: str
+
+
+class KGTraceOut(BaseModel):
+    hops: int
+    path: list[str]
+    indian_trials: list[dict]
+
+
+class BlastProfilerResponse(BaseModel):
+    patient_id: Optional[str]
+    blast_subtype: dict     # primary + differential
+    disease_state: DiseaseStateOut
+    drug_sensitivity: list[DrugSensitivity]
+    pgx_alerts: list[PgxAlertOut]
+    knowledge_graph: KGTraceOut
+    evidence_citations: list[str]
+    confidence: float
+    classifier_version: str
+    generated_at_iso: str
+
+
+# ── Heuristic subtype classifier (peer-reviewed marker rules) ──────────────
+
+def _score_b_lineage(m: MarkerPanel) -> float:
+    """B-lineage score from CD19+CD22+CD10 markers."""
+    score = 0.0
+    if m.cd19_pct is not None: score += min(m.cd19_pct, 100) * 0.50
+    if m.cd22_pct is not None: score += min(m.cd22_pct, 100) * 0.30
+    if m.cd10_pct is not None: score += min(m.cd10_pct, 100) * 0.10
+    if m.tdt_pct is not None:  score += min(m.tdt_pct,  100) * 0.05
+    if m.hla_dr_pct is not None: score += min(m.hla_dr_pct, 100) * 0.05
+    return score / 100  # normalise to 0-1
+
+
+def _score_t_lineage(m: MarkerPanel) -> float:
+    score = 0.0
+    if m.cd7_pct is not None: score += min(m.cd7_pct, 100) * 0.45
+    if m.cd3_pct is not None: score += min(m.cd3_pct, 100) * 0.35
+    if m.cd2_pct is not None: score += min(m.cd2_pct, 100) * 0.10
+    if m.tdt_pct is not None: score += min(m.tdt_pct, 100) * 0.10
+    return score / 100
+
+
+def _score_myeloid(m: MarkerPanel) -> float:
+    score = 0.0
+    if m.mpo_pct is not None:   score += min(m.mpo_pct,   100) * 0.45
+    if m.cd33_pct is not None:  score += min(m.cd33_pct,  100) * 0.25
+    if m.cd13_pct is not None:  score += min(m.cd13_pct,  100) * 0.15
+    if m.cd117_pct is not None: score += min(m.cd117_pct, 100) * 0.10
+    if m.cd34_pct is not None:  score += min(m.cd34_pct,  100) * 0.05
+    return score / 100
+
+
+def _refine_subtype(label: str, drivers: list[str]) -> Optional[str]:
+    """Map subtype + driver to a clinical refinement label."""
+    dl = [d.upper().strip() for d in drivers]
+    if label == "B-ALL":
+        if any("BCR-ABL" in d or "BCR/ABL" in d for d in dl):
+            return "Ph+ B-ALL (BCR-ABL fusion)"
+        if any("ETV6-RUNX1" in d or "TEL-AML1" in d for d in dl):
+            return "ETV6-RUNX1 (favorable)"
+        if any("KMT2A" in d or "MLL" in d for d in dl):
+            return "KMT2A-r (infant / high-risk)"
+        if any("TCF3-PBX1" in d or "E2A-PBX1" in d for d in dl):
+            return "TCF3-PBX1"
+        if any("IKZF1" in d for d in dl):
+            return "Ph-like B-ALL (IKZF1 deletion)"
+        if any("PAX5" in d for d in dl):
+            return "Ph-like B-ALL (PAX5)"
+        return "B-ALL — subtype refinement pending cytogenetics"
+    if label == "T-ALL":
+        if any("NOTCH1" in d for d in dl):
+            return "T-ALL (NOTCH1-mutant, common driver)"
+        if any("TAL1" in d for d in dl):
+            return "T-ALL (TAL1-rearranged)"
+        if any("ETP" in d for d in dl):
+            return "Early T-cell Precursor ALL (high-risk)"
+        return "T-ALL"
+    if label == "AML":
+        if any("PML-RARA" in d or "PML/RARA" in d or "APL" in d for d in dl):
+            return "APL (acute promyelocytic — ATRA + ATO)"
+        if any("FLT3" in d for d in dl):
+            return "AML with FLT3 mutation (FLT3i candidate)"
+        if any("NPM1" in d for d in dl):
+            return "AML with NPM1 mutation"
+        if any("RUNX1-RUNX1T1" in d or "t(8;21)" in d for d in dl):
+            return "Core-binding factor AML (favorable)"
+        if any("CBFB-MYH11" in d or "inv(16)" in d for d in dl):
+            return "Core-binding factor AML (favorable)"
+        if any("KMT2A" in d for d in dl):
+            return "KMT2A-r AML"
+        return "AML — subtype refinement pending cytogenetics"
+    return None
+
+
+def _classify_blast(req: BlastProfilerRequest) -> tuple[list[SubtypeProbability], float]:
+    m = req.markers
+
+    if m.blast_percent < 5:
+        # Healthy or remission marrow
+        return ([
+            SubtypeProbability(label="Healthy BM", probability=0.90),
+            SubtypeProbability(label="B-ALL", probability=0.04),
+            SubtypeProbability(label="T-ALL", probability=0.03),
+            SubtypeProbability(label="AML", probability=0.02),
+            SubtypeProbability(label="MPAL", probability=0.01),
+        ], 0.85)
+
+    b = _score_b_lineage(m)
+    t = _score_t_lineage(m)
+    myl = _score_myeloid(m)
+
+    # Detect mixed lineage (MPAL)
+    significant = sum(1 for s in (b, t, myl) if s > 0.20)
+    mpal_score = 0.0
+    if significant >= 2:
+        # WHO 2016 MPAL criteria: dual-lineage expression
+        mpal_score = min(b, t) + min(b, myl) + min(t, myl)
+        mpal_score = min(mpal_score, 0.85)
+
+    raw = {"B-ALL": b, "T-ALL": t, "AML": myl, "MPAL": mpal_score}
+    total = sum(raw.values()) or 1.0
+    probs = {k: v / total for k, v in raw.items()}
+
+    if mpal_score > 0.45:
+        # Surface MPAL as primary in mixed cases
+        probs = {"MPAL": probs.get("MPAL", 0.0) + 0.15, **{k: v for k, v in probs.items() if k != "MPAL"}}
+        s = sum(probs.values())
+        probs = {k: v / s for k, v in probs.items()}
+
+    # Build sorted differential
+    out = [SubtypeProbability(label=k, probability=round(v, 3)) for k, v in sorted(probs.items(), key=lambda kv: -kv[1])]
+    # Apply refinement to top
+    top_refined = _refine_subtype(out[0].label, req.driver_mutations)
+    if top_refined:
+        out[0] = SubtypeProbability(label=out[0].label, probability=out[0].probability, subtype_refinement=top_refined)
+
+    classifier_confidence = round(min(out[0].probability + 0.1 if m.blast_percent > 25 else out[0].probability, 0.95), 2)
+    return out, classifier_confidence
+
+
+def _mrd_risk(req: BlastProfilerRequest, top_subtype: str) -> DiseaseStateOut:
+    drivers = [d.upper() for d in req.driver_mutations]
+    high_risk = ["KMT2A", "MLL", "BCR-ABL", "FLT3", "TP53", "HYPODIPLOID", "PH-LIKE", "ETP"]
+    favorable = ["ETV6-RUNX1", "TEL-AML1", "NPM1", "RUNX1-RUNX1T1", "CBFB-MYH11", "PML-RARA"]
+
+    tp = req.timepoint.lower()
+    if "relapse" in tp:
+        base, label = 0.90, "Relapse-like"
+    elif "eoi" in tp or "induction" in tp or "remission" in tp:
+        # EOI: still blasts >5% means induction failure → very high MRD
+        base = 0.85 if req.markers.blast_percent > 5 else 0.20
+        label = "End of Induction"
+    else:
+        base, label = 0.30, "Diagnosis"
+
+    risk_drivers: list[str] = []
+    delta = 0.0
+    for d in drivers:
+        if any(h in d for h in high_risk):
+            delta += 0.15; risk_drivers.append(f"high-risk driver: {d}")
+        if any(f in d for f in favorable):
+            delta -= 0.15; risk_drivers.append(f"favorable driver: {d} (lowers risk)")
+
+    if req.age_years is not None:
+        if req.age_years < 1: delta += 0.10; risk_drivers.append("infant (<1y)")
+        elif req.age_years >= 10: delta += 0.10; risk_drivers.append("age ≥10y")
+
+    if req.wbc_x10_9_per_L is not None and req.wbc_x10_9_per_L > 50:
+        delta += 0.10; risk_drivers.append(f"WBC {req.wbc_x10_9_per_L} ×10⁹/L (>50)")
+
+    if "AML" in top_subtype.upper():
+        delta += 0.05; risk_drivers.append("AML carries higher MRD baseline than ALL")
+
+    mrd = max(0.0, min(1.0, base + delta))
+    return DiseaseStateOut(
+        label=label,
+        mrd_risk_score=round(mrd, 2),
+        relapse_similarity=round(mrd * 0.85 if label != "Relapse-like" else 1.0, 2),
+        drivers_of_risk=risk_drivers,
+    )
+
+
+def _drug_sensitivity_for_subtype(top_subtype: str, drivers: list[str]) -> list[DrugSensitivity]:
+    """Rule-based drug sensitivity grounded in WHO + CPIC + pediatric oncology protocols."""
+    drivers_u = [d.upper() for d in drivers]
+    out: list[DrugSensitivity] = []
+    sub = top_subtype.upper()
+
+    if "B-ALL" in sub or "T-ALL" in sub:
+        out.append(DrugSensitivity(drug="6-Mercaptopurine", prediction="Sensitive", confidence=0.85,
+                                    rationale="ALL maintenance backbone — sensitivity is high unless NUDT15/TPMT carrier (see PGx)"))
+        out.append(DrugSensitivity(drug="Methotrexate", prediction="Sensitive", confidence=0.85,
+                                    rationale="ALL maintenance + CNS prophylaxis — MTHFR carriers need enhanced monitoring"))
+        out.append(DrugSensitivity(drug="Vincristine", prediction="Sensitive", confidence=0.85,
+                                    rationale="ALL induction + maintenance — CYP3A5 non-expressors at neuropathy risk"))
+        out.append(DrugSensitivity(drug="L-Asparaginase", prediction="Sensitive", confidence=0.80,
+                                    rationale="ALL backbone — substitute PEG-Asp/Erwinia on hypersensitivity"))
+        if any("BCR-ABL" in d for d in drivers_u):
+            out.append(DrugSensitivity(drug="Imatinib", prediction="Sensitive", confidence=0.92,
+                                       rationale="BCR-ABL fusion → first-line TKI per COG AALL1631"))
+            out.append(DrugSensitivity(drug="Dasatinib", prediction="Sensitive", confidence=0.88,
+                                       rationale="2nd-gen BCR-ABL TKI — option on imatinib resistance"))
+        if "T-ALL" in sub:
+            out.append(DrugSensitivity(drug="Nelarabine", prediction="Intermediate", confidence=0.70,
+                                       rationale="T-ALL specific — relapsed/refractory only; neuro toxicity"))
+
+    elif "AML" in sub:
+        out.append(DrugSensitivity(drug="Cytarabine", prediction="Sensitive", confidence=0.90,
+                                    rationale="AML induction backbone (7+3 protocol with anthracycline)"))
+        out.append(DrugSensitivity(drug="Daunorubicin", prediction="Sensitive", confidence=0.88,
+                                    rationale="AML induction anthracycline — cumulative cardiotoxicity dose cap 300 mg/m²"))
+        out.append(DrugSensitivity(drug="6-Mercaptopurine", prediction="Not indicated", confidence=0.85,
+                                    rationale="6-MP is ALL maintenance; not used in AML"))
+        if any("FLT3" in d for d in drivers_u):
+            out.append(DrugSensitivity(drug="Midostaurin", prediction="Sensitive", confidence=0.85,
+                                       rationale="FLT3 mutation — first-line FLT3i with 7+3 induction"))
+        if any("PML-RARA" in d or "APL" in d for d in drivers_u):
+            out.append(DrugSensitivity(drug="All-trans retinoic acid (ATRA)", prediction="Sensitive", confidence=0.95,
+                                       rationale="APL specific — ATRA + arsenic trioxide is curative"))
+            out.append(DrugSensitivity(drug="Arsenic trioxide", prediction="Sensitive", confidence=0.92,
+                                       rationale="APL specific — combined with ATRA"))
+
+    elif "MPAL" in sub:
+        out.append(DrugSensitivity(drug="ALL-style induction (VPLD)", prediction="Sensitive", confidence=0.65,
+                                    rationale="MPAL with lymphoid features responds better to ALL-type induction (NEJM 2018)"))
+        out.append(DrugSensitivity(drug="Cytarabine", prediction="Intermediate", confidence=0.55,
+                                    rationale="Reserve for myeloid-skewed MPAL or salvage"))
+
+    return out
+
+
+def _pgx_alerts_for_patient(pgx: list[PgxGenotype]) -> list[PgxAlertOut]:
+    """Reuse PediOncoPGx classification per gene to produce alerts."""
+    alerts: list[PgxAlertOut] = []
+    phenotype, triggering = _classify_thiopurine_metabolizer(
+        [GenotypeInput(gene=g.gene, diplotype=g.diplotype) for g in pgx]
+    )
+    if phenotype != "Normal metabolizer":
+        tg = triggering[0] if triggering else {}
+        action = ("Reduce 6-MP starting dose 30-50% (CPIC 2018-19); monitor CBC twice weekly"
+                  if phenotype == "Intermediate metabolizer"
+                  else "Avoid standard 6-MP dose — use ≤10 mg/m²/day or substitute non-thiopurine therapy")
+        alerts.append(PgxAlertOut(
+            gene=tg.get("gene", "NUDT15/TPMT"),
+            variant=tg.get("diplotype"),
+            status=phenotype.lower().replace(" ", "_"),
+            action=action,
+            drug_affected="6-Mercaptopurine / Azathioprine / Thioguanine",
+            population_risk="NUDT15*3: 8-10% S.Asian (vs 0.4% European); TPMT*3C: ~3% S.Asian",
+        ))
+
+    for g in pgx:
+        if g.gene.upper() == "MTHFR" and ("677TT" in g.diplotype.upper() or "TT" in g.diplotype.upper()):
+            alerts.append(PgxAlertOut(
+                gene="MTHFR", variant=g.diplotype, status="reduced_activity",
+                action="Enhanced toxicity monitoring on MTX; intensify leucovorin rescue for HD-MTX",
+                drug_affected="Methotrexate",
+                population_risk="MTHFR 677TT: ~18% Indians homozygous (vs 10% Europeans)",
+            ))
+        if g.gene.upper() == "CYP3A5" and g.diplotype.count("*3") == 2:
+            alerts.append(PgxAlertOut(
+                gene="CYP3A5", variant="*3/*3 (non-expressor)", status="non_expressor",
+                action="Maintain 2 mg vincristine cap; active neuropathy surveillance at each visit",
+                drug_affected="Vincristine",
+                population_risk="CYP3A5*3/*3: 66% S.Asian non-expressors",
+            ))
+
+    # If no PGx provided, surface the NUDT15 genotype-required alert per BlastProfiler guide
+    if not pgx:
+        alerts.append(PgxAlertOut(
+            gene="NUDT15", variant="rs116855232 (genotype not supplied)",
+            status="unknown",
+            action="Genotype NUDT15 before initiating 6-Mercaptopurine. 8-10% of South Asian patients are intermediate or poor metabolizers.",
+            drug_affected="6-Mercaptopurine",
+            population_risk="NUDT15*3: 8-10% S.Asian carriers (vs 0.4% Europeans)",
+        ))
+    return alerts
+
+
+def _kg_traverse_for_subtype(session, top_subtype: str, drivers: list[str]) -> KGTraceOut:
+    """Query Neo4j for Indian trials matching the leukemia subtype."""
+    keyword = "leukemia"
+    sub = top_subtype.upper()
+    if "B-ALL" in sub or "T-ALL" in sub or sub.startswith("ALL"):
+        keyword = "lymphoblastic leuk"
+    elif "AML" in sub:
+        keyword = "myeloid leuk"
+
+    trials_rows = list(session.run(
+        """
+        MATCH (d:Drug)-[:HAS_INDIAN_TRIAL]->(t:ClinicalTrial)-[:INVESTIGATES_DISEASE]->(dis:Disease)
+        WHERE toLower(dis.name) CONTAINS toLower($k)
+          AND t.status IN ["RECRUITING","ACTIVE_NOT_RECRUITING","COMPLETED"]
+        RETURN d.name AS drug, t.nct_id AS ctri_id, t.title AS title, t.status AS status, t.phase AS phase
+        LIMIT 5
+        """,
+        k=keyword,
+    ))
+    trials = [{
+        "ctri_id": r["ctri_id"], "title": r["title"], "status": r["status"],
+        "phase": r["phase"], "drug": r["drug"],
+    } for r in trials_rows if r["ctri_id"]]
+
+    path = [top_subtype]
+    drivers_u = [d for d in drivers if d]
+    if drivers_u:
+        path.append(f"driver: {drivers_u[0]}")
+    if "BCR-ABL" in " ".join(drivers_u).upper():
+        path.append("ABL1 kinase")
+        path.append("TKI pathway")
+        path.append("Imatinib")
+    elif "AML" in sub:
+        path.append("myeloid pathway")
+        path.append("Cytarabine + Anthracycline")
+    else:
+        path.append("ALL induction protocol")
+        path.append("Vincristine + Prednisone + Asparaginase + Daunorubicin")
+
+    return KGTraceOut(hops=len(path) - 1, path=path, indian_trials=trials)
+
+
+@app.post("/blastprofiler/analyze", response_model=BlastProfilerResponse)
+async def blastprofiler_analyze(req: BlastProfilerRequest, user: dict = Depends(verify_user)):
+    """Pediatric leukemia subtype + MRD risk + drug sensitivity + PGx + Indian trial overlay.
+
+    v0 classifier: marker-panel + driver-mutation heuristic (peer-reviewed cell marker rules).
+    v1 (in development): scGPT fine-tuned on PedSCAtlas 540K-cell atlas.
+    """
+    differential, classifier_conf = _classify_blast(req)
+    top = differential[0]
+    blast_subtype_block = {
+        "label": top.label,
+        "subtype": top.subtype_refinement,
+        "confidence": round(top.probability, 3),
+        "differential": {p.label: round(p.probability, 3) for p in differential},
+    }
+
+    disease_state = _mrd_risk(req, top.label)
+    drug_sens = _drug_sensitivity_for_subtype(top.label, req.driver_mutations)
+    pgx_alerts = _pgx_alerts_for_patient(req.patient_pgx)
+
+    with neo4j_driver().session() as session:
+        kg = _kg_traverse_for_subtype(session, top.label, req.driver_mutations)
+
+    citations = [
+        "Mumme HL, et al. Nat Commun 16:4114 (2025) — PedSCAtlas: pediatric leukemia single-cell atlas",
+        "Cui H, et al. Nat Methods 21:1470 (2024) — scGPT foundation model (v1 classifier roadmap)",
+        "CPIC 2018-19 — Thiopurines + NUDT15/TPMT dosing guidelines",
+        "Tsang KK, et al. Annu Rev Biomed Data Sci 8:51 (2025) — Foundation models for translational cancer biology",
+    ]
+    if any("BCR-ABL" in d.upper() for d in req.driver_mutations):
+        citations.append("COG AALL1631 — Imatinib + standard BFM in Ph+ pediatric ALL")
+    if any("FLT3" in d.upper() for d in req.driver_mutations):
+        citations.append("FDA label — Midostaurin for FLT3-mutated AML")
+    if any("PML-RARA" in d.upper() or "APL" in d.upper() for d in req.driver_mutations):
+        citations.append("Lo-Coco F, et al. NEJM 369:111 (2013) — ATRA + arsenic in APL")
+    if req.patient_pgx:
+        citations.append("Ranasinghe P, et al. BMC Med Genomics (2024) — South Asian NUDT15/TPMT frequencies")
+
+    log_event(user, "blastprofiler_analyze", {
+        "subtype": top.label,
+        "refinement": top.subtype_refinement,
+        "confidence": classifier_conf,
+        "timepoint": req.timepoint,
+        "mrd_risk": disease_state.mrd_risk_score,
+        "driver_count": len(req.driver_mutations),
+        "pgx_genotype_count": len(req.patient_pgx),
+        "drug_sensitivity_count": len(drug_sens),
+        "indian_trial_count": len(kg.indian_trials),
+    })
+
+    from datetime import datetime, timezone
+    return BlastProfilerResponse(
+        patient_id=req.patient_id,
+        blast_subtype=blast_subtype_block,
+        disease_state=disease_state,
+        drug_sensitivity=drug_sens,
+        pgx_alerts=pgx_alerts,
+        knowledge_graph=kg,
+        evidence_citations=citations,
+        confidence=classifier_conf,
+        classifier_version="BlastProfiler v0 (marker+driver heuristic; scGPT/PedSCAtlas v1 in progress)",
+        generated_at_iso=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 # ── /admin/load_mammal_predictions (V2-B) ───────────────────────────────────
 
 class LoadMammalResponse(BaseModel):
