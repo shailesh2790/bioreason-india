@@ -82,7 +82,7 @@ export default function RepurposePage() {
           <p style={{ color: "var(--text-2)", fontSize: 15, maxWidth: 620, lineHeight: 1.7 }}>
             Find FDA-approved drugs with mechanistic connections to any disease —
             multi-hop paths through proteins, pathways, and Indian genetic context.
-            Augmented with 17,967 IMPPAT phytochemicals.
+            Augmented with curated IMPPAT phytochemicals (see /methods).
           </p>
         </div>
 

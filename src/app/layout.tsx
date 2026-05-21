@@ -16,7 +16,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata: Metadata = {
   title: "PetriDish — India's Biomedical Intelligence Platform",
   description:
-    "Multi-hop reasoning over 4.3M biomedical relationships, extended with Indian population genomics, 17,967 Ayurvedic compounds, and medical image analysis.",
+    "Multi-hop reasoning over 4.3M biomedical relationships, extended with Indian population genomics, a curated Ayurvedic phytochemistry layer (IMPPAT 2.0), and medical image analysis. See /methods for live data state.",
 };
 
 const NAV_LINKS = [
@@ -38,6 +38,7 @@ const NAV_LINKS = [
   { href: "/batch",            label: "Batch",        color: "hover:text-emerald-400" },
   { href: "/search",           label: "Search",       color: "hover:text-blue-400" },
   { href: "/api-docs",         label: "API",          color: "hover:text-emerald-400" },
+  { href: "/methods",          label: "Methods",      color: "hover:text-green-400" },
   { href: "/graph",            label: "Graph",        color: "hover:text-purple-400" },
 ];
 

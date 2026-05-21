@@ -29,3 +29,73 @@ IMPPAT027,Carvacrol,Cc1ccc(C(C)C)cc1O,PubChem CID 10364
 IMPPAT028,Ellagic acid,O=c1oc2c(O)c(O)cc3c2c1oc1c(O)c(O)cc-31,PubChem CID 5281855
 IMPPAT029,Thymoquinone,CC1=CC(=O)C(C(C)C)=CC1=O,PubChem CID 10281
 IMPPAT030,Tinosporin,,Complex diterpenoid - manual SMILES required
+IMPPAT031,Naringenin,O=C1CC(c2ccc(O)cc2)Oc2cc(O)cc(O)c21,PubChem CID 932
+IMPPAT032,Hesperidin,,Complex flavanone glycoside - manual SMILES required
+IMPPAT033,Kaempferol,O=c1c(O)c(-c2ccc(O)cc2)oc2cc(O)cc(O)c12,PubChem CID 5280863
+IMPPAT034,Myricetin,O=c1c(O)c(-c2cc(O)c(O)c(O)c2)oc2cc(O)cc(O)c12,PubChem CID 5281672
+IMPPAT035,Catechin,O[C@@H]1Cc2c(O)cc(O)cc2O[C@H]1c1ccc(O)c(O)c1,PubChem CID 9064
+IMPPAT036,Epicatechin,O[C@@H]1Cc2c(O)cc(O)cc2O[C@@H]1c1ccc(O)c(O)c1,PubChem CID 72276
+IMPPAT037,Pterostilbene,COc1cc(/C=C/c2ccc(O)cc2)cc(OC)c1,PubChem CID 5281727
+IMPPAT038,Silybin,COc1cc(-c2oc3cc(O)cc(O)c3c(=O)[C@@H]2CO)ccc1O[C@H]1Oc2ccc(O)cc2[C@H]1O,PubChem CID 31553
+IMPPAT039,Baicalein,O=c1cc(-c2ccccc2)oc2cc(O)c(O)c(O)c12,PubChem CID 5281605
+IMPPAT040,Rutin,,Complex flavonoid glycoside - manual SMILES required
+IMPPAT041,Fisetin,O=c1c(O)c(-c2ccc(O)c(O)c2)oc2cc(O)ccc12,PubChem CID 5281614
+IMPPAT042,Daidzein,O=c1c(-c2ccc(O)cc2)coc2cc(O)ccc12,PubChem CID 5281708
+IMPPAT043,Formononetin,COc1ccc(-c2coc3cc(O)ccc3c2=O)cc1,PubChem CID 5280378
+IMPPAT044,Biochanin A,COc1ccc(-c2coc3cc(O)cc(O)c3c2=O)cc1,PubChem CID 5280448
+IMPPAT045,Tetrahydrocurcumin,COc1cc(CCC(=O)CC(=O)CCc2ccc(O)c(OC)c2)ccc1O,PubChem CID 124072
+IMPPAT046,Ursolic acid,CC1(C)CC[C@@]2(C(=O)O)CC[C@]3(C)C(=CC[C@@H]4[C@@]3(C)CC[C@H]5C(C)(C)[C@@H](O)CC[C@@]45C)[C@@H]2C1,PubChem CID 64945
+IMPPAT047,Oleanolic acid,CC1(C)CC[C@@]2(C(=O)O)CC[C@]3(C)C(=CC[C@@H]4[C@@]3(C)CC[C@H]5C(C)(C)[C@@H](O)CC[C@@]45C)[C@H]2C1,PubChem CID 10494
+IMPPAT048,Betulinic acid,CC(=C)[C@@H]1CC[C@@]2(C(=O)O)CC[C@]3(C)[C@H]1CC[C@@H]1[C@@]3(C)CC[C@H]3C(C)(C)[C@@H](O)CC[C@@]13C,PubChem CID 64971
+IMPPAT049,Lupeol,CC(=C)[C@@H]1CC[C@@]2(C)CC[C@]3(C)C(=CC[C@@H]4[C@@]3(C)CC[C@H]5C(C)(C)[C@@H](O)CC[C@@]45C)[C@@H]2C1,PubChem CID 259846
+IMPPAT050,Glycyrrhetinic acid,CC1(C)C[C@@H]2[C@@](C)(CC[C@]3(C)[C@@H]2C(=O)C=C2[C@@H]4CC(C)(C)CC[C@]4(C(=O)O)CC[C@@]23C)[C@@H](O)CC1,PubChem CID 10114
+IMPPAT051,Diosgenin,CC1OC2CC3C4CC=C5CC(O)CCC5(C)C4CCC3(C)C2C1C,PubChem CID 99474
+IMPPAT052,Costunolide,CC1=CCCC(=C)C2CC(=O)O[C@@H]2CC1,PubChem CID 5281437
+IMPPAT053,Cucurbitacin B,,Complex tetracyclic triterpene - manual SMILES recommended
+IMPPAT054,Asiatic acid,CC1(C)CCC2(C(=O)O)CCC3(C)C(=CCC4C3(C)CCC3C(C)(CO)C(O)C(O)CC34C)C2C1,PubChem CID 119034
+IMPPAT055,Madecassic acid,CC1(C)CCC2(C(=O)O)CCC3(C)C(=CCC4C3(C)CC(O)C3C(C)(CO)C(O)C(O)CC34C)C2C1,PubChem CID 73412
+IMPPAT056,Camptothecin,CC[C@@]1(O)C(=O)OCc2c1cc1n(c2=O)Cc2cc3ccccc3nc21,PubChem CID 24360
+IMPPAT057,Reserpine,COC(=O)[C@@H]1[C@H](OC(=O)c2cc(OC)c(OC)c(OC)c2)C[C@@H]2[C@H]1C[C@@H]1c3c([nH]c4cc(OC)ccc34)CCN1C2,PubChem CID 5770
+IMPPAT058,Ajmalicine,CC[C@H]1CN2CCc3c([nH]c4ccccc34)[C@@H]2C[C@@H]1[C@H]1OC=C(C(=O)OC)C1,PubChem CID 441975
+IMPPAT059,Vasicine,OC1Cc2nc3ccccc3cn21,PubChem CID 442929
+IMPPAT060,Tetrandrine,,Complex bisbenzylisoquinoline - manual SMILES recommended
+IMPPAT061,Sanguinarine,[O-]C1=C(C2=CC3=CC=CC4=C3C(=C2)C[N+]4(C)C)OCO1,PubChem CID 5154
+IMPPAT062,Sinomenine,COC1=C(O)C2=C(CC3C2C(C(=O)C=C3OC)N(C)CC1)C,PubChem CID 5459308
+IMPPAT063,Plumbagin,Cc1cc(O)c2c(c1)C(=O)C=CC2=O,PubChem CID 10205
+IMPPAT064,Embelin,CCCCCCCCCCCC1=C(O)C(=O)C=C(O)C1=O,PubChem CID 3218
+IMPPAT065,Piperlongumine,COc1cc(/C=C/C(=O)N2CC=CC=C2)cc(OC)c1OC,PubChem CID 637858
+IMPPAT066,Beta-sitosterol,CCC(CCC(C)C1CCC2C1(CCC3C2CC=C4C3(CCC(C4)O)C)C)C(C)C,PubChem CID 222284
+IMPPAT067,Stigmasterol,CCC(/C=C/C(C)C1CCC2C1(CCC3C2CC=C4C3(CCC(C4)O)C)C)C(C)C,PubChem CID 5280794
+IMPPAT068,Chebulagic acid,,Complex ellagitannin - manual SMILES required
+IMPPAT069,Chebulic acid,O=C(O)C(O)c1cc(O)c(O)c(O)c1C(=O)C(O)C(O)C(=O)O,PubChem CID 442674
+IMPPAT070,Sennoside A,,Complex anthraquinone dimer glycoside - manual SMILES required
+IMPPAT071,Honokiol,Oc1ccc(CC=C)cc1-c1cc(CC=C)ccc1O,PubChem CID 72303
+IMPPAT072,Magnolol,Oc1ccc(CC=C)cc1-c1ccc(O)c(CC=C)c1,PubChem CID 10170
+IMPPAT073,Sesamin,O=C1OC[C@@H]2C1=CC=C1C2OC(c2ccc3c(c2)OCO3)[C@H]1c1ccc2c(c1)OCO2,PubChem CID 72307
+IMPPAT074,Pongamol,O=C1OC2(c3ccccc3)c3oc4ccccc4c3C1=C2,PubChem CID 4685
+IMPPAT075,Karanjin,COc1c2oc(=O)cc(C)c2oc2cc(OC)ccc12,PubChem CID 100868
+IMPPAT076,Withanolide D,,Complex withanolide - manual SMILES recommended
+IMPPAT077,Withanolide A,,Complex withanolide - manual SMILES recommended
+IMPPAT078,Bacoside A,,Complex bacoside saponin - manual SMILES required
+IMPPAT079,Demethoxycurcumin,COc1cc(/C=C/C(=O)CC(=O)/C=C/c2ccc(O)cc2)ccc1O,PubChem CID 5469424
+IMPPAT080,Bisdemethoxycurcumin,Oc1ccc(/C=C/C(=O)CC(=O)/C=C/c2ccc(O)cc2)cc1,PubChem CID 5315472
+IMPPAT081,Lycopene,CC(=CCC/C(C)=C/C=C/C(C)=C/C=C/C=C(C)/C=C/C=C(C)/C=C/CC/C=C(C)/C)C,PubChem CID 446925
+IMPPAT082,Astaxanthin,CC1=C(/C=C/C(C)=C/C=C/C(C)=C/C=C/C=C(C)/C=C/C=C(C)/C=C/C2=C(C)C(=O)C(O)CC2(C)C)C(C)(C)CC(O)C1=O,PubChem CID 5281224
+IMPPAT083,Caffeic acid,O=C(O)/C=C/c1ccc(O)c(O)c1,PubChem CID 689043
+IMPPAT084,Ferulic acid,COc1cc(/C=C/C(=O)O)ccc1O,PubChem CID 445858
+IMPPAT085,Chlorogenic acid,O=C(/C=C/c1ccc(O)c(O)c1)O[C@@H]1C[C@@](O)(C(=O)O)C[C@@H](O)[C@H]1O,PubChem CID 1794427
+IMPPAT086,Hydroxytyrosol,OCCc1ccc(O)c(O)c1,PubChem CID 82755
+IMPPAT087,Oleuropein,,Complex secoiridoid glycoside - manual SMILES required
+IMPPAT088,Punarnavine,,Complex rotenoid/quinolizidine - manual SMILES recommended
+IMPPAT089,L-DOPA,N[C@@H](Cc1ccc(O)c(O)c1)C(=O)O,PubChem CID 6047
+IMPPAT090,Vincristine,,Complex bisindole alkaloid - PubChem CID 5978 - manual SMILES recommended
+IMPPAT091,Vinblastine,,Complex bisindole alkaloid - PubChem CID 13342 - manual SMILES recommended
+IMPPAT092,Artemisinin,CC1CCC2C(C)C(=O)O[C@@H]3O[C@@]4(C)CC[C@H]1[C@@]23OO4,PubChem CID 68827
+IMPPAT093,Quinine,COc1ccc2nccc([C@@H](O)[C@H]3CC4CCN3C[C@H]4C=C)c2c1,PubChem CID 3034034
+IMPPAT094,Colchicine,COc1cc2c(c(OC)c1OC)-c1ccc(=O)c(OC)cc1[C@H](NC(C)=O)CC2,PubChem CID 6167
+IMPPAT095,Yohimbine,COC(=O)[C@H]1[C@@H](O)CC[C@H]2CN3CCc4c([nH]c5ccccc45)[C@@H]3C[C@@H]12,PubChem CID 8969
+IMPPAT096,Caffeine,Cn1c(=O)c2c(ncn2C)n(C)c1=O,PubChem CID 2519
+IMPPAT097,Theobromine,Cn1cnc2c1c(=O)[nH]c(=O)n2C,PubChem CID 5429
+IMPPAT098,Theophylline,Cn1c(=O)c2[nH]cnc2n(C)c1=O,PubChem CID 2153
+IMPPAT099,Embelin acid,CCCCCCCCCCCC1=C(O)C(=O)C=C(O)C1=O,PubChem CID 3218
+IMPPAT100,Salvianolic acid B,,Complex caffeic acid trimer - manual SMILES recommended

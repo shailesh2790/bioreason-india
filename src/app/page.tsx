@@ -2,8 +2,8 @@ import Link from "next/link";
 import MoleculeBackground from "@/components/MoleculeBackground";
 
 const STATS = [
-  { value: "4.3M+",  label: "Biomedical relationships", sub: "PrimeKG + IMPPAT + IndiGen" },
-  { value: "17,967", label: "Ayurvedic compounds",       sub: "IMPPAT 2.0, ACTREC" },
+  { value: "4.4M+",  label: "Biomedical relationships", sub: "PrimeKG + IMPPAT + IndiGen + CTRI" },
+  { value: "100",    label: "Ayurvedic compounds curated", sub: "Full IMPPAT 17,967 via ACTREC in progress · see /methods" },
   { value: "180",    label: "Indian clinical trials",     sub: "ClinicalTrials.gov, CTRI" },
   { value: "1.4B",   label: "People. One platform.",      sub: "India-first by design" },
 ];
@@ -144,7 +144,7 @@ export default function HomePage() {
             {
               icon: "🌿", color: "#F59E0B",
               title: "Traditional medicine gap",
-              body: "17,967 Ayurvedic phytochemicals. Zero mechanistic evidence in any global knowledge graph. CDSCO requires computational validation — no tool provides it.",
+              body: "17,967 Ayurvedic phytochemicals catalogued in IMPPAT 2.0. Zero mechanistic evidence in any global knowledge graph. CDSCO requires computational validation — no tool provides it. We have curated 100 high-export compounds; full ingestion via ACTREC academic agreement in progress.",
             },
             {
               icon: "🔬", color: "#06B6D4",

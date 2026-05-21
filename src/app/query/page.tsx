@@ -21,7 +21,7 @@ export default function Home() {
             Multi-hop reasoning over{" "}
             <span style={{ color: "var(--text-1)", fontWeight: 600 }}>4.3 million biomedical relationships</span>
             {" "}— extended with{" "}
-            <span style={{ color: "var(--green)" }}>17,967 Ayurvedic compounds</span>,{" "}
+            <span style={{ color: "var(--green)" }}>a curated Ayurvedic phytochemistry layer</span>,{" "}
             <span style={{ color: "var(--amber)" }}>Indian PGx variants</span>, and{" "}
             <span style={{ color: "var(--cyan)" }}>180+ clinical trials</span>.
           </p>
