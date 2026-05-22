@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import PathGraph from "@/components/PathGraph";
 import NetworkGraph, { GraphData } from "@/components/NetworkGraph";
 import { exportReportPdf } from "@/lib/exportPdf";
+import { useAuth } from "@/lib/auth";
 
 interface PathResult {
   nodes: Array<{ id: string; name: string; labels?: string[] }>;
@@ -55,6 +56,7 @@ const CONF_CLASS: Record<string, string> = {
 };
 
 export default function QueryInterface() {
+  const { fetchWithAuth } = useAuth();
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ReasonResponse | null>(null);
@@ -71,7 +73,7 @@ export default function QueryInterface() {
     setError(null);
 
     try {
-      const res = await fetch("/api/reason", {
+      const res = await fetchWithAuth("/api/reason", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, max_hops: 3, india_context: true }),
