@@ -1,0 +1,51 @@
+name,type,target_mark,cancer_role,key_cancer_types,overexpressed_in_cancer,druggable,top_drug,evidence_pmid,notes
+EZH2,Writer,H3K27me3,Oncogene,follicular lymphoma;DLBCL;breast;prostate;OSCC,true,true,Tazemetostat,28571635,Most overexpressed epigenetic regulator in cancer; PRC2 catalytic
+DNMT3A,Writer,DNA-CpG-methylation,Context,AML;MDS;T-ALL,true,true,Azacitidine,21359208,Frequent mutations in AML; loss-of-function drives clonal hematopoiesis
+DNMT1,Writer,DNA-CpG-methylation,Context,multiple,true,true,Decitabine,16574463,Maintenance methylation; targeted by hypomethylating agents in MDS/AML
+DNMT3B,Writer,DNA-CpG-methylation,Oncogene,colorectal;liver;ICF syndrome,true,true,Azacitidine,21359208,De novo methylation; ICF mutations also implicated
+DOT1L,Writer,H3K79me2,Oncogene,MLL-rearranged leukemia,true,true,Pinometostat,19710073,KMT2A-r AML driver; H3K79 methyltransferase
+NSD1,Writer,H3K36me2,Context,AML;NUT carcinoma;HNSCC,false,false,—,32132697,NUP98-NSD1 fusions in AML
+NSD2,Writer,H3K36me2,Oncogene,multiple myeloma;ALL,true,false,—,21300787,t(4;14) MM driver; KMT2D paralog
+NSD3,Writer,H3K36me2,Oncogene,NUT midline carcinoma;lung,true,false,—,31959988,Fusion partner in NUT carcinoma
+SETD2,Writer,H3K36me3,TSG,ccRCC;leukemia,false,false,—,21926974,Frequent inactivation in clear cell RCC
+EHMT2,Writer,H3K9me2,Oncogene,lung;melanoma,true,false,—,21873635,G9a; suppresses immune genes via H3K9me
+KDM6A,Eraser,H3K27me3,TSG,bladder;esophageal;T-ALL,false,false,—,25500544,UTX; frequent LOF mutations in bladder
+KDM6B,Eraser,H3K27me3,Context,GBM;T-ALL,true,false,—,26390150,JMJD3; counters EZH2; required for T-ALL maintenance
+TET1,Eraser,5-methylcytosine,TSG,AML;breast,false,false,—,22057236,5mC to 5hmC conversion
+TET2,Eraser,5-methylcytosine,TSG,AML;MDS;CMML,false,false,—,19474426,Frequent loss-of-function in myeloid; clonal hematopoiesis
+TET3,Eraser,5-methylcytosine,Context,multiple,false,false,—,21496894,Active demethylation pathway
+HDAC1,Eraser,H3K9ac;H3K14ac;H4K5ac,Context,multiple,true,true,Vorinostat,11099047,Class I HDAC; broad expression
+HDAC2,Eraser,Histone acetyl,Context,multiple,true,true,Romidepsin,17173050,Class I HDAC; CTCL responsive
+HDAC3,Eraser,Histone acetyl,Context,colorectal;lymphoma,true,true,Vorinostat,17173050,Class I HDAC
+HDAC6,Eraser,Tubulin;HSP90,Context,multiple myeloma;CTCL,true,true,Belinostat,23039605,Cytoplasmic HDAC; targets non-histone substrates
+KDM5A,Eraser,H3K4me3,Oncogene,gastric;cervix;leukemia,true,false,—,18033247,JARID1A; drives drug resistance
+BRD2,Reader,H3K27ac;H4K12ac,Oncogene,multiple,true,true,Birabresib,21889194,BET family; MYC enhancer reader
+BRD3,Reader,H3K27ac,Oncogene,multiple,true,true,Birabresib,21889194,BET family
+BRD4,Reader,H3K27ac;H3K14ac,Oncogene,MYC-driven lymphoma;NUT carcinoma,true,true,Birabresib,21889194,Most studied BET; drives MYC; NUT-BRD4 fusion
+BRDT,Reader,H3K27ac,Context,germ cell;testis cancer,false,false,—,21889194,Testis-restricted BET
+CBX5,Reader,H3K9me3,Oncogene,breast;melanoma metastasis,true,false,—,18922893,HP1-alpha; heterochromatin
+CBX1,Reader,H3K9me3,Context,multiple,false,false,—,18922893,HP1-beta
+CBX3,Reader,H3K9me3,Oncogene,lung;ovarian,true,false,—,18922893,HP1-gamma
+MBD1,Reader,methyl-CpG,TSG,colorectal,false,false,—,17498744,Methylation reader
+MBD2,Reader,methyl-CpG,Oncogene,colorectal;breast,true,false,—,17498744,Recruits HDAC
+MECP2,Reader,methyl-CpG,Context,Rett syndrome;hepatocellular,false,false,—,17498744,Methylation reader; neuro disease as well
+ARID1A,Remodeler,SWI/SNF,TSG,ovarian clear cell;endometrial;gastric;HCC,false,false,—,21822268,Most frequent SWI/SNF mutation in cancer
+ARID1B,Remodeler,SWI/SNF,TSG,multiple,false,false,—,21822268,Frequently inactivated in cancers with ARID1A-WT
+SMARCA4,Remodeler,SWI/SNF ATPase,TSG,SCCOHT;rhabdoid;NSCLC,false,false,—,20436461,BRG1; lethal LOF in SCCOHT
+SMARCB1,Remodeler,SWI/SNF,TSG,rhabdoid tumor;epithelioid sarcoma,false,false,—,9671307,SNF5; biallelic loss defines rhabdoid
+PBRM1,Remodeler,SWI/SNF (PBAF),TSG,ccRCC;cholangiocarcinoma,false,false,—,21248752,Second-most-mutated gene in ccRCC
+BAP1,Remodeler;Eraser,deubiquitinase H2AK119ub,TSG,mesothelioma;uveal melanoma;ccRCC,false,false,—,21874000,Both germline and somatic in cancer predisposition
+ATRX,Remodeler,SWI/SNF;H3.3,TSG,pediatric GBM;pancreatic NET,false,false,—,21390126,Alternative lengthening of telomeres mechanism
+DAXX,Remodeler,H3.3 chaperone,TSG,pancreatic NET,false,false,—,21390126,Partners with ATRX
+CHD1,Remodeler,Chromatin SF2,Context,prostate;multiple,false,false,—,22556303,Frequently deleted in prostate
+CHD7,Remodeler,CHARGE syndrome,Context,CHARGE syndrome;medulloblastoma,false,false,—,22556303,Developmental disorder + cancer link
+MYC,TF,enhancer-driven,Oncogene,Burkitt;DLBCL;neuroblastoma;multiple,true,true,Birabresib,15103379,Universal oncogene; BET-inhibitor target
+SPI1,TF,immune transcription,Context,NE India HNC;AML,false,false,—,33033692,PU.1; epigenetically dysregulated in NE India oropharyngeal
+RUNX1,TF,hematopoiesis,Context,AML;ALL;NE India HNC,false,false,—,33033692,RUNX1-RUNX1T1 = favorable AML; dysregulated in NE India HNC
+RUNX1T1,TF,fusion partner,Oncogene,AML,true,false,—,33033692,t(8;21) fusion with RUNX1 in CBF-AML
+FOXA1,TF,pioneer factor,Oncogene,breast;prostate;ER+ tumors,true,false,—,21822268,Pioneer factor; ER-positive breast driver
+GATA3,TF,T-cell;luminal,Context,breast (luminal);T-cell lymphoma,true,false,—,21822268,Luminal breast biomarker
+TP53,TF,DNA damage response,TSG,multiple (>50% of cancers),false,false,—,21422972,Guardian of genome; loss enables CIN
+RB1,TF,cell cycle,TSG,retinoblastoma;SCLC;multiple,false,false,—,21422972,E2F regulation
+KMT2A,Writer;TF,H3K4 methyltransferase,Context,MLL-rearranged ALL;AML,false,true,Pinometostat,19710073,MLL; fusion partner; needs DOT1L
+NSD3-fusion,Writer-fusion,H3K36me,Oncogene,NUT carcinoma,true,false,—,31959988,BRD4-NSD3 partnership in NUT

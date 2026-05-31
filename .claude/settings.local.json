@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(railway volume add --help 2>&1)"
+      "PowerShell(railway volume add --help 2>&1)",
+      "Bash(railway login *)",
+      "Bash(cat ~/.railway/config.json 2>&1 | head -20)",
+      "Read(//c/Users/Shailesh/.railway/**)",
+      "Bash(railway environment *)",
+      "Bash(xargs wc -l)",
+      "Bash(bash scripts/deploy.sh \"EpiOnco v0: 50 curated epifactors + 3 documented Indian-specific epigenetic signatures + Tumour Ability Score with India overlay + downloadable Brief PDF\")"
     ]
   }
 }

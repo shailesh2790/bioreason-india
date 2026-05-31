@@ -3515,6 +3515,487 @@ async def blastprofiler_analyze(req: BlastProfilerRequest, user: dict = Depends(
     )
 
 
+# ── EpiOnco v0 (Epigenetics + Tumour Ability for Indian patients) ───────────
+#
+# The doc-defined module: 50 curated epifactors + 3 documented Indian-specific
+# epigenetic signatures + composite Tumour Ability Score (TAS) with India overlay.
+# v0 heuristic; full TCGA + 800-epifactor + ICGA ingestion on roadmap.
+
+CANCER_HALLMARKS = [
+    "Sustaining proliferative signalling",
+    "Evading growth suppressors",
+    "Resisting cell death",
+    "Enabling replicative immortality",
+    "Inducing angiogenesis",
+    "Activating invasion and metastasis",
+    "Reprogramming energy metabolism",
+    "Evading immune destruction",
+    "Unlocking phenotypic plasticity",
+    "Non-mutational epigenetic reprogramming",
+    "Polymorphic microbiomes",
+    "Senescent cells",
+    "Tumour-promoting inflammation",
+    "Cell-genome instability and mutation",
+]
+
+
+class TASRequest(BaseModel):
+    gene: Optional[str] = None
+    cancer_type: str  # OSCC | HNC | PDAC | AML | breast | DLBCL | etc.
+    population: str = "Indian"  # Indian | Global
+
+
+class TASComponent(BaseModel):
+    layer: str
+    score: float
+    weight: float
+    contributors: list[str]
+
+
+class IndianSignatureHit(BaseModel):
+    signature_id: str
+    pmid: str
+    summary: str
+    key_genes: list[str]
+    immunotherapy_response: str
+    prognosis: str
+    distinctive_from_tcga: str
+
+
+class TASResponse(BaseModel):
+    gene: Optional[str]
+    cancer_type: str
+    population: str
+    tas_global: float
+    tas_india: float
+    delta_tas: float
+    hallmarks_active: list[str]
+    top_targetable_epifactors: list[dict]
+    immunotherapy_response: str
+    indian_signature_match: Optional[IndianSignatureHit]
+    components: list[TASComponent]
+    evidence_citations: list[str]
+    confidence: float
+    note: str
+    generated_at_iso: str
+
+
+# ── /admin/load_epionco ─────────────────────────────────────────────────────
+
+class LoadEpioncoResponse(BaseModel):
+    epifactors_loaded: int
+    epigenetic_drug_edges_loaded: int
+    india_signatures_loaded: int
+    final_epifactor_count: int
+    final_inhibits_epifactor_edges: int
+    final_india_signature_count: int
+
+
+@app.post("/admin/load_epionco", response_model=LoadEpioncoResponse)
+async def admin_load_epionco(x_admin_token: str = Header(default="")):
+    expected = os.getenv("ADMIN_TOKEN", "")
+    if not expected or x_admin_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Token")
+
+    base = os.path.join(os.path.dirname(__file__), "data")
+    epi_csv = os.path.join(base, "epifactors.csv")
+    drug_csv = os.path.join(base, "epigenetic_drugs.csv")
+    sig_csv = os.path.join(base, "india_epigenetic_signatures.csv")
+
+    import csv as csv_mod
+
+    epifactors = list(csv_mod.DictReader(open(epi_csv, encoding="utf-8")))
+    drugs = list(csv_mod.DictReader(open(drug_csv, encoding="utf-8")))
+    signatures = list(csv_mod.DictReader(open(sig_csv, encoding="utf-8")))
+
+    ef_loaded = 0
+    drug_edges_loaded = 0
+    sigs_loaded = 0
+
+    with neo4j_driver().session() as session:
+        # Epifactor nodes
+        for row in epifactors:
+            name = (row.get("name") or "").strip()
+            if not name:
+                continue
+            session.run(
+                """
+                MERGE (e:EpifactorNode {name: $name})
+                SET e.type = $type,
+                    e.target_mark = $mark,
+                    e.cancer_role = $role,
+                    e.key_cancer_types = $ctypes,
+                    e.overexpressed_in_cancer = $over,
+                    e.druggable = $drug,
+                    e.top_drug = $topdrug,
+                    e.evidence_pmid = $pmid,
+                    e.notes = $notes,
+                    e.source = 'EpiOnco_v0_curated'
+                """,
+                name=name,
+                type=(row.get("type") or "").strip(),
+                mark=(row.get("target_mark") or "").strip(),
+                role=(row.get("cancer_role") or "").strip(),
+                ctypes=(row.get("key_cancer_types") or "").strip(),
+                over=str(row.get("overexpressed_in_cancer", "")).lower() == "true",
+                drug=str(row.get("druggable", "")).lower() == "true",
+                topdrug=(row.get("top_drug") or "").strip(),
+                pmid=(row.get("evidence_pmid") or "").strip(),
+                notes=(row.get("notes") or "").strip(),
+            )
+            ef_loaded += 1
+
+        # Drug → Epifactor edges
+        for row in drugs:
+            drug = (row.get("drug_name") or "").strip()
+            targets = (row.get("target_epifactor") or "").split(";")
+            for t in targets:
+                t = t.strip()
+                if not drug or not t:
+                    continue
+                session.run(
+                    """
+                    MERGE (d:Drug {name: $drug})
+                      ON CREATE SET d.id = 'epionco:'+$drug, d.source = 'EpiOnco_v0_curated'
+                    SET d:EpigeneticDrug
+                    SET d.mechanism = $mech,
+                        d.fda_status = $fda,
+                        d.key_indications = $ind,
+                        d.epi_pmid = $pmid
+                    """,
+                    drug=drug,
+                    mech=(row.get("mechanism") or "").strip(),
+                    fda=(row.get("fda_status") or "").strip(),
+                    ind=(row.get("key_indications") or "").strip(),
+                    pmid=(row.get("clinical_pmid") or "").strip(),
+                )
+                session.run(
+                    """
+                    MATCH (d:Drug {name: $drug})
+                    MATCH (e:EpifactorNode {name: $t})
+                    MERGE (d)-[r:INHIBITS_EPIFACTOR]->(e)
+                    SET r.mechanism = $mech, r.fda_status = $fda, r.source = 'EpiOnco_v0_curated'
+                    """,
+                    drug=drug, t=t,
+                    mech=(row.get("mechanism") or "").strip(),
+                    fda=(row.get("fda_status") or "").strip(),
+                )
+                drug_edges_loaded += 1
+
+        # India signatures
+        for row in signatures:
+            sid = (row.get("signature_id") or "").strip()
+            if not sid:
+                continue
+            session.run(
+                """
+                MERGE (s:IndiaEpigeneticSignature {signature_id: $sid})
+                SET s.cancer_type = $ct,
+                    s.population = $pop,
+                    s.subregion = $sub,
+                    s.mechanism = $mech,
+                    s.key_genes = $genes,
+                    s.key_transcription_factors = $tfs,
+                    s.methylation_direction = $dir,
+                    s.prognosis = $prog,
+                    s.immunotherapy_response = $ir,
+                    s.immune_signature = $immune,
+                    s.distinctive_from_tcga = $dist,
+                    s.pmid = $pmid,
+                    s.year = $year,
+                    s.journal = $journal,
+                    s.summary = $summary
+                """,
+                sid=sid,
+                ct=(row.get("cancer_type") or "").strip(),
+                pop=(row.get("population") or "").strip(),
+                sub=(row.get("subregion") or "").strip(),
+                mech=(row.get("mechanism") or "").strip(),
+                genes=(row.get("key_genes") or "").strip(),
+                tfs=(row.get("key_transcription_factors") or "").strip(),
+                dir=(row.get("methylation_direction") or "").strip(),
+                prog=(row.get("prognosis") or "").strip(),
+                ir=(row.get("immunotherapy_response") or "").strip(),
+                immune=(row.get("immune_signature") or "").strip(),
+                dist=(row.get("distinctive_from_tcga") or "").strip(),
+                pmid=(row.get("pmid") or "").strip(),
+                year=(row.get("year") or "").strip(),
+                journal=(row.get("journal") or "").strip(),
+                summary=(row.get("summary") or "").strip(),
+            )
+            sigs_loaded += 1
+
+        final_ef = session.run("MATCH (e:EpifactorNode) RETURN count(e) AS c").single()["c"]
+        final_drug_edges = session.run("MATCH ()-[r:INHIBITS_EPIFACTOR]->() RETURN count(r) AS c").single()["c"]
+        final_sigs = session.run("MATCH (s:IndiaEpigeneticSignature) RETURN count(s) AS c").single()["c"]
+
+    return LoadEpioncoResponse(
+        epifactors_loaded=ef_loaded,
+        epigenetic_drug_edges_loaded=drug_edges_loaded,
+        india_signatures_loaded=sigs_loaded,
+        final_epifactor_count=final_ef,
+        final_inhibits_epifactor_edges=final_drug_edges,
+        final_india_signature_count=final_sigs,
+    )
+
+
+# ── /epionco/tas — Tumour Ability Score ─────────────────────────────────────
+
+# Cancer-type alias map for queries (so "OSCC" matches "oral squamous cell carcinoma")
+_CANCER_ALIAS = {
+    "OSCC": ["oral squamous", "oscc"],
+    "HNC":  ["head and neck", "hnc", "hnscc", "oropharyngeal"],
+    "PDAC": ["pancreatic ductal", "pdac", "pancreatic"],
+    "AML":  ["acute myeloid", "aml"],
+    "DLBCL":["diffuse large b-cell", "dlbcl", "lymphoma"],
+    "BREAST":["breast"],
+    "PROSTATE":["prostate"],
+    "LUNG": ["lung", "nsclc", "sclc"],
+    "B-ALL":["b-cell acute lymphoblastic", "b-all", "all"],
+    "T-ALL":["t-cell acute lymphoblastic", "t-all"],
+    "BLADDER":["bladder", "urothelial"],
+}
+
+
+def _canonicalise_cancer(ct: str) -> str:
+    """Return short code (OSCC, AML, etc.) given any input string."""
+    cl = ct.lower()
+    for code, aliases in _CANCER_ALIAS.items():
+        if any(a in cl for a in aliases) or ct.upper() == code:
+            return code
+    return ct
+
+
+def _hanahan_hallmarks_for_epifactor(role: str, name: str) -> list[str]:
+    """Map epifactor role to active Hanahan-Weinberg hallmarks."""
+    out = ["Non-mutational epigenetic reprogramming"]
+    name_u = name.upper()
+    role_u = role.upper()
+    if role_u == "ONCOGENE":
+        out += ["Sustaining proliferative signalling", "Resisting cell death"]
+        if name_u in ("EZH2","BRD4","MYC","RUNX1T1","NSD2","NSD3"):
+            out.append("Activating invasion and metastasis")
+        if name_u in ("EZH2","EHMT2"):
+            out.append("Evading immune destruction")
+    elif role_u == "TSG":
+        out += ["Evading growth suppressors"]
+        if name_u in ("TP53","ARID1A","KDM6A"):
+            out.append("Cell-genome instability and mutation")
+        if name_u in ("BAP1","ATRX","DAXX"):
+            out.append("Enabling replicative immortality")
+    return list(dict.fromkeys(out))
+
+
+@app.post("/epionco/tas", response_model=TASResponse)
+async def epionco_tas(req: TASRequest, user: dict = Depends(verify_user)):
+    """Composite Tumour Ability Score with Indian population overlay.
+
+    v0 heuristic: combines epifactor overexpression, hallmark coverage, and
+    Indian signature match. Documented Indian deviation (delta_tas) surfaces
+    when an India-specific signature applies to the cancer type.
+    """
+    cancer_code = _canonicalise_cancer(req.cancer_type)
+    pop = req.population.strip() or "Indian"
+
+    with neo4j_driver().session() as session:
+        # Layer 1 — epifactors active in this cancer type
+        epifactors_rows = list(session.run(
+            """
+            MATCH (e:EpifactorNode)
+            WHERE toLower(e.key_cancer_types) CONTAINS toLower($ct_code)
+               OR toLower(e.key_cancer_types) CONTAINS toLower($ct_raw)
+            OPTIONAL MATCH (d:Drug)-[:INHIBITS_EPIFACTOR]->(e)
+            RETURN e.name AS name, e.type AS type, e.cancer_role AS role,
+                   e.target_mark AS mark, e.druggable AS druggable, e.top_drug AS top_drug,
+                   e.overexpressed_in_cancer AS over, e.evidence_pmid AS pmid,
+                   collect(DISTINCT {drug: d.name, fda: d.fda_status})[0..3] AS drugs
+            ORDER BY (CASE WHEN e.overexpressed_in_cancer THEN 0 ELSE 1 END), e.name
+            LIMIT 10
+            """,
+            ct_code=cancer_code, ct_raw=req.cancer_type,
+        ))
+
+        # Layer 2 — gene-specific epifactor matches
+        gene_epifactors: list[dict] = []
+        if req.gene:
+            gene_rows = list(session.run(
+                """
+                MATCH (e:EpifactorNode)
+                WHERE toUpper(e.name) = toUpper($g)
+                OPTIONAL MATCH (d:Drug)-[:INHIBITS_EPIFACTOR]->(e)
+                RETURN e.name AS name, e.cancer_role AS role, e.overexpressed_in_cancer AS over,
+                       e.top_drug AS top_drug, e.target_mark AS mark, e.evidence_pmid AS pmid,
+                       collect(DISTINCT d.name)[0..3] AS drugs
+                """,
+                g=req.gene,
+            ))
+            gene_epifactors = [dict(r) for r in gene_rows]
+
+        # Layer 3 — Indian signature match
+        sig_rows = list(session.run(
+            """
+            MATCH (s:IndiaEpigeneticSignature)
+            WHERE toLower(s.cancer_type) CONTAINS toLower($ct_raw)
+               OR toLower(s.cancer_type) CONTAINS toLower($ct_code)
+            RETURN s
+            LIMIT 1
+            """,
+            ct_raw=req.cancer_type, ct_code=cancer_code,
+        ))
+        signature_hit: Optional[IndianSignatureHit] = None
+        if sig_rows and pop.lower() == "indian":
+            s = sig_rows[0]["s"]
+            sd = dict(s)
+            signature_hit = IndianSignatureHit(
+                signature_id=sd.get("signature_id",""),
+                pmid=sd.get("pmid",""),
+                summary=sd.get("summary",""),
+                key_genes=[g.strip() for g in (sd.get("key_genes","") or "").split(";") if g.strip()],
+                immunotherapy_response=sd.get("immunotherapy_response","Uncertain"),
+                prognosis=sd.get("prognosis","Unknown"),
+                distinctive_from_tcga=sd.get("distinctive_from_tcga",""),
+            )
+
+    # Build hallmarks set
+    hallmarks: set[str] = set()
+    top_targetable: list[dict] = []
+    contributors_l1: list[str] = []
+    contributors_l2: list[str] = []
+
+    for r in epifactors_rows:
+        name = r.get("name") or ""
+        role = r.get("role") or ""
+        if r.get("over") and name:
+            contributors_l1.append(f"{name} ({role})")
+        for hm in _hanahan_hallmarks_for_epifactor(role, name):
+            hallmarks.add(hm)
+        if r.get("druggable") and name:
+            top_targetable.append({
+                "epifactor": name,
+                "role": role,
+                "mark": r.get("mark"),
+                "top_drug": r.get("top_drug"),
+                "approved_drugs": [d for d in (r.get("drugs") or []) if d and d.get("drug")],
+                "pmid": r.get("pmid"),
+            })
+
+    for r in gene_epifactors:
+        name = r.get("name") or ""
+        if name:
+            contributors_l2.append(name)
+            for hm in _hanahan_hallmarks_for_epifactor(r.get("role") or "", name):
+                hallmarks.add(hm)
+
+    # Layer scores (heuristic, normalised 0-1)
+    l1_score = min(len([r for r in epifactors_rows if r.get("over")]) / 6.0, 1.0)
+    l2_score = min(len(gene_epifactors) / 2.0, 1.0) if req.gene else 0.4  # neutral baseline
+    l3_score = min(len(hallmarks) / 8.0, 1.0)
+    l4_score = 0.85 if signature_hit else 0.0
+
+    # tas_global = layers 1-3 only
+    tas_global = round((l1_score * 0.45) + (l2_score * 0.25) + (l3_score * 0.30), 3)
+    # tas_india = adds layer 4 with reweight
+    tas_india = round(
+        (l1_score * 0.35) + (l2_score * 0.20) + (l3_score * 0.25) + (l4_score * 0.20),
+        3,
+    )
+    delta_tas = round(tas_india - tas_global, 3)
+
+    components = [
+        TASComponent(layer="L1 — Epifactor overexpression in this cancer", score=round(l1_score,3), weight=0.35 if signature_hit else 0.45, contributors=contributors_l1[:5]),
+        TASComponent(layer="L2 — Gene-specific epifactor evidence", score=round(l2_score,3), weight=0.20 if signature_hit else 0.25, contributors=contributors_l2[:5]),
+        TASComponent(layer="L3 — Hallmark coverage", score=round(l3_score,3), weight=0.25 if signature_hit else 0.30, contributors=list(hallmarks)[:5]),
+        TASComponent(layer="L4 — Indian population overlay (PMID-grounded)", score=round(l4_score,3), weight=0.20 if signature_hit else 0.0, contributors=[signature_hit.signature_id] if signature_hit else []),
+    ]
+
+    citations = [
+        "Hanahan D, Weinberg RA — Cell (2011); Hanahan — Cancer Discovery (2022) — Hallmarks of Cancer 14-mark framework",
+        "Curated EpifactorDB subset (50 of ~800) — full ingestion on roadmap",
+    ]
+    if signature_hit:
+        citations.append(f"PMID:{signature_hit.pmid} — {signature_hit.summary[:120]}…")
+        immunotherapy_response = signature_hit.immunotherapy_response
+        note = (
+            f"Indian-specific signature match: {signature_hit.signature_id}. "
+            f"This signature is documented as distinctive from TCGA — predicted "
+            f"behaviour for Indian patients differs from global TCGA-trained models. "
+            f"v0 heuristic; full TCGA + ICGA ingestion on roadmap."
+        )
+    else:
+        immunotherapy_response = "No Indian signature in v0 corpus for this cancer type"
+        note = (
+            f"No Indian-specific epigenetic signature in v0 corpus for '{req.cancer_type}'. "
+            f"v0 covers OSCC, NE India HNC, and Indian PDAC. Full TCGA + 800-epifactor + ICGA "
+            f"ingestion on roadmap — see /methods."
+        )
+
+    confidence = round(0.55 + (0.10 if signature_hit else 0) + (0.05 if req.gene else 0) + min(len(epifactors_rows) * 0.02, 0.20), 2)
+
+    log_event(user, "epionco_tas", {
+        "gene": req.gene,
+        "cancer_type": req.cancer_type,
+        "canonical_cancer": cancer_code,
+        "population": pop,
+        "tas_global": tas_global,
+        "tas_india": tas_india,
+        "delta_tas": delta_tas,
+        "signature_match": signature_hit.signature_id if signature_hit else None,
+    })
+
+    from datetime import datetime, timezone
+    return TASResponse(
+        gene=req.gene,
+        cancer_type=req.cancer_type,
+        population=pop,
+        tas_global=tas_global,
+        tas_india=tas_india,
+        delta_tas=delta_tas,
+        hallmarks_active=sorted(hallmarks),
+        top_targetable_epifactors=top_targetable[:6],
+        immunotherapy_response=immunotherapy_response,
+        indian_signature_match=signature_hit,
+        components=components,
+        evidence_citations=citations,
+        confidence=confidence,
+        note=note,
+        generated_at_iso=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@app.get("/epionco/signatures")
+async def epionco_signatures():
+    """List all Indian-specific epigenetic signatures available (public)."""
+    with neo4j_driver().session() as session:
+        rows = list(session.run("MATCH (s:IndiaEpigeneticSignature) RETURN s"))
+    return {
+        "module": "EpiOnco v0",
+        "signatures": [dict(r["s"]) for r in rows],
+        "note": "v0 corpus: 3 documented Indian-specific epigenetic studies. Full TCGA + ICGA on roadmap.",
+    }
+
+
+@app.get("/epionco/epifactors")
+async def epionco_epifactors():
+    """List the curated epifactor catalogue (public)."""
+    with neo4j_driver().session() as session:
+        rows = list(session.run(
+            """
+            MATCH (e:EpifactorNode)
+            OPTIONAL MATCH (d:Drug)-[:INHIBITS_EPIFACTOR]->(e)
+            RETURN e.name AS name, e.type AS type, e.target_mark AS mark,
+                   e.cancer_role AS role, e.druggable AS druggable, e.top_drug AS top_drug,
+                   e.key_cancer_types AS cancer_types,
+                   collect(DISTINCT d.name)[0..3] AS approved_drugs
+            ORDER BY e.type, e.name
+            """
+        ))
+    return {
+        "module": "EpiOnco v0",
+        "epifactors": [dict(r) for r in rows],
+        "note": "v0 catalogue: 50 high-priority epifactors. Full EpifactorDB (~800) on roadmap.",
+    }
+
+
 # ── /admin/load_mammal_predictions (V2-B) ───────────────────────────────────
 
 class LoadMammalResponse(BaseModel):

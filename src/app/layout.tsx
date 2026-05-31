@@ -27,6 +27,7 @@ const NAV_LINKS = [
   { href: "/hypothesis",       label: "Hypothesis",   color: "hover:text-yellow-400" },
   { href: "/repurpose",        label: "Repurpose",    color: "hover:text-blue-400" },
   { href: "/oncorepurpose",    label: "OncoRepurpose",color: "hover:text-purple-400", hot: true },
+  { href: "/epionco",          label: "EpiOnco",      color: "hover:text-purple-400", hot: true },
   { href: "/validate",         label: "Ayurveda",     color: "hover:text-orange-400" },
   { href: "/herbcheck",        label: "HerbCheck",    color: "hover:text-red-400",    hot: true },
   { href: "/pedonco",          label: "PediOncoPGx",  color: "hover:text-red-400",    hot: true },

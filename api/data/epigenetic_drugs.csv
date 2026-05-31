@@ -1,0 +1,15 @@
+drug_name,target_epifactor,mechanism,fda_status,key_indications,clinical_pmid,notes
+Tazemetostat,EZH2,EZH2 SAM-competitive inhibitor,Approved 2020,Epithelioid sarcoma;follicular lymphoma (EZH2-mutant),31526756,EPZ-6438; landmark first-in-class EZH2 inhibitor
+GSK126,EZH2,EZH2 SAM-competitive inhibitor,Phase 1,DLBCL EZH2-mutant,23023262,Highly selective EZH2 tool compound
+Azacitidine,DNMT3A;DNMT1,Cytidine analog hypomethylator,Approved 2004,MDS;AML,15126323,5-azacytidine; backbone of MDS therapy
+Decitabine,DNMT1,Cytidine analog hypomethylator,Approved 2006,MDS;AML;CMML,16574463,5-aza-2-deoxycytidine; can be combined with venetoclax
+Pinometostat,DOT1L,SAM-competitive DOT1L inhibitor,Phase 1,MLL-rearranged AML/ALL,26527075,EPZ-5676; first DOT1L inhibitor
+Vorinostat,HDAC1;HDAC2;HDAC3,Pan-HDAC inhibitor,Approved 2006,CTCL,18025459,SAHA; first FDA-approved HDAC inhibitor
+Romidepsin,HDAC1;HDAC2,Cyclic depsipeptide HDAC inhibitor,Approved 2009,CTCL;PTCL,17127155,FK228; potent class I HDACi
+Belinostat,HDAC1;HDAC2;HDAC3;HDAC6,Pan-HDAC inhibitor,Approved 2014,PTCL,25049332,PXD101
+Panobinostat,HDAC1;HDAC2;HDAC3;HDAC6,Pan-HDAC inhibitor,Approved 2015,multiple myeloma,25575598,LBH589; with bortezomib in MM
+Tucidinostat,HDAC1;HDAC2;HDAC3;HDAC10,Subtype-selective HDAC inhibitor,Approved China 2014,PTCL;breast,25232116,Chidamide; approved in China for PTCL and HR+ breast
+Birabresib,BRD2;BRD3;BRD4;BRDT,BET bromodomain inhibitor,Phase 1/2,NUT carcinoma;MYC-driven lymphoma,24037421,OTX015; pan-BET clinical lead
+Molibresib,BRD2;BRD3;BRD4,BET inhibitor,Phase 1,NUT carcinoma;solid tumors,29348142,GSK525762
+All-trans retinoic acid,N/A (epigenetic reprogrammer),Differentiation agent + PML-RARA inhibitor,Approved 1995,APL;t(15;17),8420471,ATRA; backbone of APL cure with arsenic
+Arsenic trioxide,N/A (epigenetic reprogrammer),Degrades PML-RARA fusion,Approved 2000,APL,11731437,Combined with ATRA gives >95% APL cure
